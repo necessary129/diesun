@@ -1,6 +1,7 @@
 #lang racket
 (require racket/set racket/stream)
 (require racket/fixnum)
+(require racket/set)
 (require "interp-Lint.rkt")
 (require "interp-Lvar.rkt")
 (require "interp-Cvar.rkt")
@@ -13,9 +14,13 @@
 (define (uniquify-exp env)    ;; TODO: this function currently does nothing. Your code goes here
   (lambda (e)
     (match e
-      [(Var x) (Var x)]
+      [(Var x) (Var (dict-ref env x))]
       [(Int n) (Int n)]
-      [(Let x e body) (Let x e body)]
+      [(Let x e body) (let* ([newvar (gensym x)]
+                             [newexp ((uniquify-exp env) e)]
+                             [newenv (dict-set env x newvar)]
+                             [newbody ((uniquify-exp newenv) body)])
+                        (Let newvar newexp newbody))]
       [(Prim op es)
        (Prim op (for/list ([e es]) ((uniquify-exp env) e)))])))
 
