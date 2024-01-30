@@ -21,17 +21,54 @@
                              [newenv (dict-set env x newvar)]
                              [newbody ((uniquify-exp newenv) body)])
                         (Let newvar newexp newbody))]
-      [(Prim op es)
-       (Prim op (for/list ([e es]) ((uniquify-exp env) e)))])))
+      [(Prim op es) (Prim op (for/list ([e es]) ((uniquify-exp env) e)))]
+      [_ e])))
 
 ;; uniquify : Lvar -> Lvar
 (define (uniquify p)
   (match p
     [(Program info e) (Program info ((uniquify-exp '()) e))]))
 
+(define (accumulate_aexps es)
+  (foldr
+   (lambda (e flist)
+     (match-let ([(list oldes oldbinds) flist])
+       (let-values
+           ([(newe newbinds) (rco_atom e)])
+         (list (cons newe oldes) (append newbinds oldbinds)))))
+   '(() ())
+   es)
+  )
+  
+(define (rco_atom e)
+  (match e
+    [(Var _) (values e '())]
+    [(Int _) (values e '())]
+    [(Let x e body) (let ([tmpvar (gensym 'tmp)]
+                          [newe (rco_exp e)]
+                          [newbody (rco_exp body)])
+                      (values (Var tmpvar) `((,tmpvar . ,(Let x newe newbody)))))]
+    [(Prim op es) (match-let ([(list aexps binds) (accumulate_aexps es)])
+                    (let ([tmpvar (gensym 'tmp)])
+                      (values (Var tmpvar) `((,tmpvar . ,(Prim op aexps)) ,@binds))))]))
+
+(define (makeMultiLet binds body)
+  (foldl (lambda (bind body)
+           (Let (car bind) (cdr bind) body)) body binds))
+
+(define (rco_exp e)
+  (match e
+    [(Let x e body) (let* ([newexp (rco_exp e)]
+                           [newbody (rco_exp body)])
+                      (Let x newexp newbody))]
+    [(Prim op es) (match-let ([(list aexps binds) (accumulate_aexps es)])
+                    (makeMultiLet binds (Prim op aexps)))]
+    [_ e]))
+
 ;; remove-complex-opera* : Lvar -> Lvar^mon
 (define (remove-complex-opera* p)
-  (error "TODO: code goes here (remove-complex-opera*)"))
+  (match p
+    [(Program info e) (Program info (rco_exp e))]))
 
 ;; explicate-control : Lvar^mon -> Cvar
 (define (explicate-control p)
@@ -60,7 +97,7 @@
   `(
      ;; Uncomment the following passes as you finish them.
      ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
-     ;; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
+     ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
      ;; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
      ;; ("instruction selection" ,select-instructions ,interp-x86-0)
      ;; ("assign homes" ,assign-homes ,interp-x86-0)
