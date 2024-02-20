@@ -171,29 +171,91 @@
   )
 )
 
+(define (assign-home-atm e locs)
+  (match e
+    [(Reg _) e]
+    [(Imm _) e]
+    [(Var v) (Deref 'rbp (dict-ref locs v))]))
+
+(define (assign-homes-aexps es locs)
+  (foldr (lambda (e l)
+           (cons (assign-home-atm e locs) l)) '() es))
+
+(define (assign-homes-instr e locs)
+  (match e
+    [(Instr op es) (Instr op (assign-homes-aexps es locs))]
+    [_ e]))
+
+(define (assign-homes-block block locs)
+  (match block
+    [(Block info es) (Block info (for/list ([e es]) (assign-homes-instr e locs)))]))
+
+(define (get-locs ltypes)
+  (let* ([len (add1 (length ltypes))] [finallen (+ len (modulo len 2))] [stackspace (* 8 finallen)])
+    (values stackspace (for/list ([ltype ltypes] [i (in-range 1 len)])
+    (cons (car ltype) (* -8 i))))))
 ;; assign-homes : x86var -> x86var
 (define (assign-homes p)
-  (error "TODO: code goes here (assign-homes)"))
+  (match p
+    [(X86Program info body) (let-values ([(stackspace locs) (get-locs (dict-ref info 'locals-types))])
+                              (X86Program (dict-set info 'stack-space stackspace) (for/list ([block body])
+                                 (cons (car block) (assign-homes-block (cdr block) locs)))))]))
 
+(define (patch-instr e)
+  (match e
+    [(Instr op (list (Deref r1 o1) (Deref r2 o2)))
+     (list (Instr 'movq (list (Deref r1 o1) (Reg 'rax)))
+           (Instr op (list (Reg 'rax) (Deref r2 o2))))]
+    [(Instr op (list (Imm n1) (Deref r1 o1)))
+     #:when (> n1 65536)
+     (list (Instr 'movq (list (Imm n1) (Reg 'rax)))
+           (Instr op (list (Reg 'rax) (Deref r1 o1))))]
+    [(Instr op (list (Deref r1 o1) (Imm n1)))
+     #:when (> n1 65536)
+     (list (Instr 'movq (list (Imm n1) (Reg 'rax)))
+           (Instr op (list (Deref r1 o1) (Reg 'rax))))]
+    [_ (list e)]))
+
+(define (patch-block block)
+  (match block
+    [(Block info es) (Block info (append-map patch-instr es))]))
 ;; patch-instructions : x86var -> x86int
 (define (patch-instructions p)
-  (error "TODO: code goes here (patch-instructions)"))
+  (match p
+    [(X86Program info body) (X86Program info (for/list ([block body])
+                                               (cons (car block) (patch-block (cdr block)))))]))
 
+
+(define (generate-prelude info)
+  (Block '() (list
+              (Instr 'pushq (list (Reg 'rbp)))
+              (Instr 'movq (list (Reg 'rsp) (Reg 'rbp)))
+              (Instr 'subq (list (Imm (dict-ref info 'stack-space)) (Reg 'rsp)))
+              (Jmp 'start))))
+
+(define (generate-conclusion info)
+  (Block '() (list
+              (Instr 'addq (list (Imm (dict-ref info 'stack-space)) (Reg 'rsp)))
+              (Instr 'popq (list (Reg 'rbp)))
+              (Retq))))
 ;; prelude-and-conclusion : x86int -> x86int
 (define (prelude-and-conclusion p)
-  (error "TODO: code goes here (prelude-and-conclusion)"))
+  (match p
+    [(X86Program info body) (X86Program info (dict-set* body
+                                                        'main (generate-prelude info)
+                                                        'conclusion (generate-conclusion info)))]))
 
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
 ;; must be named "compiler.rkt"
 (define compiler-passes
   `(
-     ;; Uncomment the following passes as you finish them.
-     ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
-     ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
-     ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
-     ("instruction selection" ,select-instructions ,interp-x86-0)
-     ;; ("assign homes" ,assign-homes ,interp-x86-0)
-     ;; ("patch instructions" ,patch-instructions ,interp-x86-0)
-     ;; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
-     ))
+    ;; Uncomment the following passes as you finish them.
+    ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
+    ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
+    ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
+    ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
+    ("assign homes" ,assign-homes ,interp-x86-0)
+    ("patch instructions" ,patch-instructions ,interp-x86-0)
+    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+    ))
