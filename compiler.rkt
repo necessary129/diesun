@@ -88,6 +88,46 @@
     [(Prim op es) (Seq (Assign (Var x) (Prim op es)) cont)]
     [_ (error "explicate_assign unhandled case" e)]))
 
+(define (pe_add env)
+  (lambda (r1 r2)
+    (match* (r1 r2)
+      [((Int 0) _) r2]
+      [((Int n1) (Int n2)) (Int (fx+ n1 n2))]
+      [((Int n1) (Prim '- (list (Int n2)))) (Int (fx- n1 n2))]
+      [((Int n1) (Prim (?  (or/c '+ '-) op) (list (Int n2) e)))
+       ((pe_exp env) (Prim '+ (list (Int ((if (eq? op '+) fx+ fx-) n1 n2)) e)))]
+      [(_ (Int _)) ((pe_add env) r2 r1)]
+      [(_ _) (Prim '+ (list r1 r2))])))
+
+(define (pe_sub env)
+  (lambda (r1 r2) ((pe_add env) r1 ((pe_neg env) r2))))
+
+(define (pe_neg env)
+  (lambda (r1)
+    (match r1
+      [(Int n) (Int (fx- 0 n))]
+      [(Prim '+ (list e1 e2)) ((pe_add env) ((pe_neg env) e1) ((pe_neg env) e2))]
+      [(Prim '- (list e1 e2)) ((pe_add env) ((pe_neg env) e1) e2)]
+      [(Prim '- (list e)) e]
+      ;; [(Prim (? (or/c '+ '-) op) (list (Int n1) e)) (Prim op (list (Int ((if (eq? op '+) fx- fx+) 0 n1)) (Prim (if (eq? op '+) '+ '-) (list (pe_exp e)))))]
+      [_ (Prim '- (list r1))])))
+
+(define (pe_exp env)
+  (lambda (e)
+    (match e
+      [(Var x) (dict-ref env x e)]
+      [(Prim '+ (list e1 e2)) ((pe_add env) ((pe_exp env) e1) ((pe_exp env) e2))]
+      [(Prim '- (list e1 e2)) ((pe_sub env) ((pe_exp env) e1) ((pe_exp env) e2))]
+      [(Prim '- (list e1)) ((pe_neg env) ((pe_exp env) e1))]
+      [(Let x e body) (let ([rhs ((pe_exp env) e)])
+                        (if (atm? rhs)
+                            ((pe_exp (dict-set env x rhs)) body)
+                            (Let x rhs ((pe_exp env) body))))]
+      [_ e])))
+
+(define (partial-eval p)
+  (match p
+    [(Program info e) (Program info ((pe_exp '()) e))]))
 
 ;; explicate-control : Lvar^mon -> Cvar
 (define (explicate-control p)
@@ -251,6 +291,7 @@
 (define compiler-passes
   `(
     ;; Uncomment the following passes as you finish them.
+    ("Partial eval" ,partial-eval ,interp-Lvar ,type-check-Lvar)
     ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
