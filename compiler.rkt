@@ -166,7 +166,7 @@
     ]
     [(Prim 'read '())
       (list 
-        (Callq 'read_int)
+        (Callq 'read_int 0)
         (Instr 'movq (list (Reg 'rax) v))
       )
     ]
