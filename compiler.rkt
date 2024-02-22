@@ -31,7 +31,7 @@
     [(Program info e) (Program info ((uniquify-exp '()) e))]))
 
 (define (accumulate_aexps es)
-  (foldr
+  (foldl
    (lambda (e flist)
      (match-let ([(list oldes oldbinds) flist])
        (let-values
