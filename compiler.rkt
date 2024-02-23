@@ -247,11 +247,11 @@
      (list (Instr 'movq (list (Deref r1 o1) (Reg 'rax)))
            (Instr op (list (Reg 'rax) (Deref r2 o2))))]
     [(Instr op (list (Imm n1) (Deref r1 o1)))
-     #:when (> n1 65536)
+     #:when (> (abs n1) 65535)
      (list (Instr 'movq (list (Imm n1) (Reg 'rax)))
            (Instr op (list (Reg 'rax) (Deref r1 o1))))]
     [(Instr op (list (Deref r1 o1) (Imm n1)))
-     #:when (> n1 65536)
+     #:when (> (abs n1) 65535)
      (list (Instr 'movq (list (Imm n1) (Reg 'rax)))
            (Instr op (list (Deref r1 o1) (Reg 'rax))))]
     [_ (list e)]))
