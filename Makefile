@@ -8,5 +8,8 @@ runtime.o: runtime.c runtime.h
 test: runtime.o
 	$(RACKET) run-tests.rkt
 
+fuzz: runtime.o
+	timeout --signal=HUP --preserve-status 1800 ./fuzz.sh
+
 clean:
 	$(RM) -f *.o *.out *.exe *.s *~
