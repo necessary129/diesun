@@ -243,15 +243,19 @@
 
 (define (patch-instr e)
   (match e
+    [(Instr op (list (Imm n1) r))
+     #:when (and (> (abs n1) 2147483647) (not (equal? op 'movq)))
+     (list (Instr 'movq (list (Imm n1) (Reg 'rdx)))
+           (Instr op (list (Reg 'rdx) r)))]
     [(Instr op (list (Deref r1 o1) (Deref r2 o2)))
      (list (Instr 'movq (list (Deref r1 o1) (Reg 'rax)))
            (Instr op (list (Reg 'rax) (Deref r2 o2))))]
     [(Instr op (list (Imm n1) (Deref r1 o1)))
-     #:when (> (abs n1) 65535)
+     #:when (> (abs n1) 2147483647)
      (list (Instr 'movq (list (Imm n1) (Reg 'rax)))
            (Instr op (list (Reg 'rax) (Deref r1 o1))))]
     [(Instr op (list (Deref r1 o1) (Imm n1)))
-     #:when (> (abs n1) 65535)
+     #:when (> (abs n1) 2147483647)
      (list (Instr 'movq (list (Imm n1) (Reg 'rax)))
            (Instr op (list (Deref r1 o1) (Reg 'rax))))]
     [_ (list e)]))
