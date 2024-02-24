@@ -22,8 +22,8 @@ fuzz() {
 		for _ in $(seq 1 "$reads"); do
 			echo $RANDOM >>"${testname}.in"
 		done
-		res=$(racket "${testname}.rkt" <"${testname}.in")
-		echo $((res % 256)) >"${testname}.res"
+		res="$(racket ${testname}.rkt <${testname}.in)"
+		echo "$(( ((res % 256) + 256) % 256 ))" >"${testname}.res"
 		tail -n +2 "${testname}.rkt" >"${testname}1.rkt"
 		rm "${testname}.rkt" && mv "${testname}1.rkt" "${testname}.rkt"
 		racket fuzz-test.rkt 2>&1 | grep 'FAILURE' && break
@@ -35,6 +35,10 @@ fuzz() {
 	echo "=== INPUT ==="
 	cat "${testname}.in"
 	echo "=== END INPUT ==="
+	echo "=== RES ==="
+	cat "${testname}.res"
+	echo "=== END RES ==="
+	racket fuzz-test.rkt
 	racket run-tests.rkt
 	exit 1
 
