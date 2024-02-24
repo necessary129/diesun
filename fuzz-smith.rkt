@@ -6,7 +6,7 @@
          racket/string
          racket/port
          racket/fixnum)
-
+(require-clotho-wrapped math)
 (define-spec-component arith)
 
 (add-to-grammar
@@ -23,9 +23,11 @@
                     #:prop reference-info (read)]
  ;; [SetBangRet Expression (name Expression)
  ;;             #:prop reference-info (write)]
- [LiteralInt Expression ([v = (random 4294967087)])]
- [Addition Expression ([es : Expression * = 2])]
- [Subtraction Expression ([es : Expression * = 2])]
+ [LiteralInt Expression ([v = (random-bits 64)])]
+ [Addition Expression ([es : Expression * = 2])
+           #:prop choice-weight 25]
+ [Subtraction Expression ([es : Expression * = 2])
+              #:prop choice-weight 25]
  [PrimRead Expression ()]
  )
 
