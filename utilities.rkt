@@ -12,7 +12,7 @@
 
 #lang racket
 (require racket/struct)
-
+(require graph)
 ;; Version 0.2
 ;; ---------------------
 #|
@@ -55,23 +55,24 @@ Changelog:
 
 (provide debug-level AST-output-syntax at-debug-level? debug verbose copious
          map2 map3 b2i i2b
-         racket-id->c-id 
+         racket-id->c-id
          hash-union set-union*
-         fix while 
+         fix while
          label-name lookup extend-env make-dispatcher assert
          fun-call? indirect-call?
-         read-fixnum read-program 
-	 compile compile-file check-passes-suite interp-tests compiler-tests
+         read-fixnum read-program
+         reg-colors
+         compile compile-file check-passes-suite interp-tests compiler-tests
          compiler-tests-gui compiler-tests-suite
          use-minimal-set-of-registers!
-	 general-registers num-registers-for-alloc registers-for-alloc
+         general-registers num-registers-for-alloc registers-for-alloc
          caller-save callee-save caller-save-for-alloc callee-save-for-alloc
-	 arg-registers rootstack-reg register->color color->register
+         arg-registers rootstack-reg register->color color->register
          registers align byte-reg->full-reg print-by-type strip-has-type
-         make-lets dict-set-all dict-remove-all goto-label get-basic-blocks 
+         make-lets dict-set-all dict-remove-all goto-label get-basic-blocks
          symbol-append any-tag parse-program vector->set atm? fst
          print-x86 print-x86-class
-         
+
          (contract-out [struct Prim ((op symbol?) (arg* exp-list?))])
          (contract-out [struct Var ((name symbol?))])
          (contract-out [struct Int ((value fixnum?))])
@@ -108,11 +109,11 @@ Changelog:
                                      (type type?)
                                      (types type-list?))])
 
-         
+
          #;(struct-out TagOf)
          (struct-out Closure)
          (struct-out AssignedFree)
-           
+
          (contract-out [struct Assign ((lhs lhs?) (rhs exp?))])
          (contract-out [struct Seq ((fst stmt?) (snd tail?))])
          (contract-out [struct Return ((arg exp?))])
@@ -127,7 +128,7 @@ Changelog:
          (struct-out AllocateProxy)
          (contract-out [struct Call ((fun atm?) (arg* atm-list?))])
          (contract-out [struct TailCall ((fun atm?) (arg* atm-list?))])
-         
+
          (contract-out [struct Imm ((value integer?))]) ;; allow 64-bit
          (contract-out [struct Reg ((name symbol?))])
          (contract-out [struct Deref ((reg symbol?) (offset fixnum?))])
@@ -144,12 +145,12 @@ Changelog:
 
          (contract-out [struct JmpIf ((cnd symbol?) (target symbol?))])
          (contract-out [struct ByteReg ((name symbol?))])
-         
+
          (struct-out Tagged)
          (struct-out Function)
          (struct-out CFunction)
          (struct-out X86Function)
-         
+
          )
 
 ;; debug state is a nonnegative integer.
@@ -346,6 +347,20 @@ Changelog:
                 (csp ast port mode)]
                ))))])
 
+(define (print-dot graph port)
+  ((lambda (out-file)
+     (write-string "strict graph {" out-file) (newline out-file)
+
+     (for ([v (in-vertices graph)])
+       (write-string (format "~a;\n" v) out-file))
+
+     (for ([u (in-vertices graph)])
+       (for ([v (in-neighbors graph u)])
+         (write-string (format "~a -- ~a;\n" u v) out-file)))
+
+     (write-string "}" out-file)
+     (newline out-file)) port))
+
 (define (print-info info port mode)
   (let ([recur (make-recur port mode)])
     (for ([(label data) (in-dict info)])
@@ -365,6 +380,11 @@ Changelog:
                [else
                 (recur data port)
                 (newline port)])]
+        ['conflicts
+         (write-string "conflicts:" port)
+         (newline port)
+         (print-dot data port)
+         ]
         [else
          (write-string (symbol->string label) port)
          (write-string ":" port)
@@ -2468,11 +2488,14 @@ Changelog:
 (define (num-registers-for-alloc)
   (vector-length registers-for-alloc))
 
+;; (define (color->register c)
+;;   (vector-ref registers-for-alloc c))
+
 (define (color->register c)
-  (vector-ref registers-for-alloc c))
+  (car (findf (lambda (v) (eq? c (cdr v))) (reg-colors))))
 
 (define registers (set-union (list->set (vector->list general-registers))
-			     (set 'rax 'r11 'r15 'rsp 'rbp '__flag)))
+                             (set 'rax 'r11 'r15 'rsp 'rbp '__flag)))
 
 (define (align n alignment)
   (cond [(eq? 0 (modulo n alignment))

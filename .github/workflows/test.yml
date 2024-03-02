@@ -6,6 +6,13 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@master
+    - name: Cache Racket dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/racket
+          ~/.local/share/racket
+        key: ${{ runner.os }}-racket-8.12
     - name: Install Racket
       uses: Bogdanp/setup-racket@v1.11
       with:
@@ -13,5 +20,7 @@ jobs:
         distribution: 'full'
         variant: 'CS'
         version: '8.12'
+    - name: Install Dependencies
+      run: raco pkg install --auto --skip-installed graph
     - name: Run tests
       run: make test
