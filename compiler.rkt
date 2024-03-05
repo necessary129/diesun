@@ -396,7 +396,7 @@
                [availregset (set-subtract reg-set (list->set satur))]
                [color (if (> 0 (set-count availregset)) (argmin identity (set->list availregset)) maxloc)])
           ;; (debug 'most most)
-          ;; (printf "most ~a~n" most)
+          ;; (printf "most ~a: ~a: color: ~a~n" most satur color)
           (unless (dict-has-key? colors most)
             (set-color! most color)
 
