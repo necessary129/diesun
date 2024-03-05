@@ -23,4 +23,4 @@ jobs:
     - name: Install Dependencies
       run: raco pkg install --auto --skip-installed xsmith graph
     - name: Fuzz
-      run: make TIMEOUT=7200 fuzz
+      run: make TIMEOUT=20400 fuzz
