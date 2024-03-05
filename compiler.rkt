@@ -423,7 +423,7 @@
 (define compiler-passes
   ;; Uncomment the following passes as you finish them.
   `(
-    ;; ("Partial eval" ,partial-eval ,interp-Lvar ,type-check-Lvar)
+    ("Partial eval" ,partial-eval ,interp-Lvar ,type-check-Lvar)
     ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
