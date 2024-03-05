@@ -380,7 +380,7 @@
          [get-satur (lambda (v)
                       (filter-map (lambda (d) (dict-ref colors d #f)) (sequence->list (in-neighbors g v))))]
          [cmp (lambda (x y)
-                (<= (length (get-satur x)) (length (get-satur y))))]
+                (>= (length (get-satur x)) (length (get-satur y))))]
          [set-color! (lambda (loc color)
                        (dict-set! colors loc color))]
          [pq (make-pqueue cmp)]
@@ -395,8 +395,11 @@
                [maxloc (add1 (argmax identity satur))]
                [availregset (set-subtract reg-set (list->set satur))]
                [color (if (> 0 (set-count availregset)) (argmin identity (set->list availregset)) maxloc)])
+          ;; (debug 'most most)
+          ;; (printf "most ~a~n" most)
           (unless (dict-has-key? colors most)
             (set-color! most color)
+
             (for ([u (in-neighbors g most)] )
               (pqueue-decrease-key! pq (get-handle u)))
             )))
