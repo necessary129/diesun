@@ -16,7 +16,7 @@ fuzz() {
 	testname="tests/var_test_zfuzz${pid}"
 	while true; do
 		echo '#lang racket' >"${testname}.rkt"
-		racket fuzz-smith.rkt --max-depth 15 >>"${testname}.rkt"
+		racket fuzz-smith.rkt --max-depth 25 >>"${testname}.rkt"
 		reads=$(grep -o '(read)' "${testname}.rkt" | wc -l)
 		touch "${testname}.in"
 		for _ in $(seq 1 "$reads"); do

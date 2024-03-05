@@ -279,7 +279,7 @@
 
 (define (color->loc c callee-len)
   (let* ([nreg (num-registers-for-alloc)])
-    (if (> c nreg)
+    (if (>= c nreg)
         (Deref 'rbp (* -8 (+ callee-len (- c nreg))))
         (Reg (color->register c)))))
 
@@ -394,7 +394,7 @@
                [satur (get-satur most)]
                [maxloc (add1 (argmax identity satur))]
                [availregset (set-subtract reg-set (list->set satur))]
-               [color (if (set-count availregset) (argmin identity (set->list availregset)) maxloc)])
+               [color (if (> 0 (set-count availregset)) (argmin identity (set->list availregset)) maxloc)])
           (unless (dict-has-key? colors most)
             (set-color! most color)
             (for ([u (in-neighbors g most)] )
