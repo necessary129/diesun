@@ -394,15 +394,14 @@
                [satur (get-satur most)]
                [maxloc (add1 (argmax identity satur))]
                [availregset (set-subtract reg-set (list->set satur))]
-               [color (if (> 0 (set-count availregset)) (argmin identity (set->list availregset)) maxloc)])
+               [color (if (> (set-count availregset) 0) (argmin identity (set->list availregset)) maxloc)])
           ;; (debug 'most most)
           ;; (printf "most ~a: ~a: color: ~a~n" most satur color)
+          ;; (printf "maxloc: ~a color: ~a availregset: ~a~n" maxloc color availregset)
           (unless (dict-has-key? colors most)
             (set-color! most color)
-
             (for ([u (in-neighbors g most)] )
-              (pqueue-decrease-key! pq (get-handle u)))
-            )))
+              (pqueue-decrease-key! pq (get-handle u))))))
       colors)))
 
 (define (reg-color-block b)
