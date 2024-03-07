@@ -23,7 +23,7 @@
                     #:prop reference-info (read)]
  ;; [SetBangRet Expression (name Expression)
  ;;             #:prop reference-info (write)]
- [LiteralInt Expression ([v = (random-bits 64)])]
+ [LiteralInt Expression ([v = (random-bits 40)])]
  [Addition Expression ([es : Expression * = 2])
            #:prop choice-weight 25]
  [Subtraction Expression ([es : Expression * = 2])

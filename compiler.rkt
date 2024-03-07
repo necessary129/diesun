@@ -292,14 +292,15 @@
          [nloc (argmax identity (hash-values colors))]
          [nstack (max 0 (- nloc nreg))]
          ;; [used-callee (filter-map (lambda (v) (if (set-member? callee-colors v) (color->register v) #f)) (hash-values colors))]
-         [used-callee (filter (not/c #f) (hash-map colors (lambda (k v)
+         [used-callee (list->set (filter (not/c #f) (hash-map colors (lambda (k v)
                                                             (if (and (set-member? callee-colors v) (not (set-member? registers k)))
                                                                 (color->register v)
-                                                                #f))))]
+                                                                #f)))))]
          [locs (for/list ([var ltypes])
-                 (cons var (color->loc (dict-ref colors var) (length used-callee))))]
+                 (cons var (color->loc (dict-ref colors var) (set-count used-callee))))]
          )
-    (values nstack (list->set used-callee) locs)))
+    (printf "nreg: ~a nloc: ~a nstack: ~a used-callee: ~a locs: ~a~n" nreg nloc nstack used-callee locs)
+    (values nstack used-callee locs)))
 ;; assign-homes : x86var -> x86var
 ;; (define (assign-homes p)
 ;;  (match p

@@ -11,12 +11,13 @@ cleanup () {
 }
 trap cleanup EXIT
 trap "exit 0" SIGHUP
+export PATH=$HOME/racket/bin:$PATH
 fuzz() {
 	pid=$$
-	testname="tests/var_test_zfuzz${pid}"
+	testname="tests/var${pid}_test_zfuzz"
 	while true; do
 		echo '#lang racket' >"${testname}.rkt"
-		racket fuzz-smith.rkt --max-depth 25 >>"${testname}.rkt"
+		racket fuzz-smith.rkt --max-depth 25 --type-max-depth 25 >>"${testname}.rkt"
 		reads=$(grep -o '(read)' "${testname}.rkt" | wc -l)
 		touch "${testname}.in"
 		for _ in $(seq 1 "$reads"); do
@@ -26,7 +27,8 @@ fuzz() {
 		echo "$(( ((res % 256) + 256) % 256 ))" >"${testname}.res"
 		tail -n +2 "${testname}.rkt" >"${testname}1.rkt"
 		rm "${testname}.rkt" && mv "${testname}1.rkt" "${testname}.rkt"
-		racket fuzz-test.rkt 2>&1 | grep 'FAILURE' && break
+		racket fuzz-test-debug.rkt "var${pid}" 2>&1 | grep 'FAILURE' && break
+		test "${PIPESTATUS[0]}" -eq 0 || break
 		rm "${testname}.in"
 	done
 	echo "=== PROGRAM ==="
@@ -38,9 +40,7 @@ fuzz() {
 	echo "=== RES ==="
 	cat "${testname}.res"
 	echo "=== END RES ==="
-	racket fuzz-test.rkt
-	racket run-tests.rkt
+	racket fuzz-test.rkt "var${pid}"
 	exit 1
-
 }
 fuzz
