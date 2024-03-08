@@ -11,12 +11,12 @@
 set -eu
 source $HOME/.bashrc
 
-umask 0700
-mkdir -p /scratch/shamil
-cd /scratch/shamil
+umask 077
+rm -rf /scratch/shamil-com
+mkdir -p /scratch/shamil-com
+cd /scratch/shamil-com
 
-rm -rf compilers
-cp $HOME/compilers-s24-racket-x86-diesun ./compilers
+cp -r $HOME/compilers-s24-racket-x86-diesun ./compilers
 cd compilers
 
 secs_to_human(){
@@ -24,7 +24,7 @@ secs_to_human(){
 }
 start=$(date +%s)
 echo "$(date -d @${start} "+%Y-%m-%d %H:%M:%S"): ${SLURM_JOB_NAME} start id=${SLURM_JOB_ID}\n"
+echo "Starting fuzzing..."
 (bash fuzz-parallel.sh) \
-    && (cat JOB$SLURM_JOB_ID.out |mail -s "$SLURM_JOB_NAME Ended after $(secs_to_human $(($(date +%s) - ${start}))) id=$SLURM_JOB_ID" muhammed.shamil@research.iiit.ac.in && echo mail sended) \
-|| (cat JOB$SLURM_JOB_ID.out |mail -s "$SLURM_JOB_NAME Failed after $(secs_to_human $(($(date +%s) - ${start}))) id=$SLURM_JOB_ID" muhammed.shamil@research.iiit.ac.in && echo mail sended && exit $?)
-
+    && (cat JOB$SLURM_JOB_ID.out |mail -s "$SLURM_JOB_NAME Ended after $(secs_to_human $(($(date +%s) - ${start}))) id=$SLURM_JOB_ID" muhammed.shamil@research.iiit.ac.in kriti.gupta@research.iiit.ac.in && echo mail sended) \
+|| (cat JOB$SLURM_JOB_ID.out |mail -s "$SLURM_JOB_NAME Failed after $(secs_to_human $(($(date +%s) - ${start}))) id=$SLURM_JOB_ID" muhammed.shamil@research.iiit.ac.in kriti.gupta@research.iiit.ac.in && echo mail sended && exit $?)
