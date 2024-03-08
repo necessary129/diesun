@@ -11,6 +11,14 @@
 set -eu
 source $HOME/.bashrc
 
+umask 0700
+mkdir -p /scratch/shamil
+cd /scratch/shamil
+
+rm -rf compilers
+cp $HOME/compilers-s24-racket-x86-diesun ./compilers
+cd compilers
+
 secs_to_human(){
     echo "$(( ${1} / 3600 )):$(( (${1} / 60) % 60 )):$(( ${1} % 60 ))"
 }
