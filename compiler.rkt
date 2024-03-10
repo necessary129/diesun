@@ -231,7 +231,7 @@
   (match loc
     [(Var v) v]
     [(Reg v) v]
-    [_ void]))
+    [_ #f]))
 
 (define (get_edge_instr instr lafter)
   (match instr
@@ -252,6 +252,20 @@
 (define (build_interference p)
   (match p
     [(X86Program info blocks) (X86Program info (for/list ([block blocks]) `(,(car block) . ,(build_interference_block (cdr block)))))]))
+
+(define (get_mov_related instr)
+  (match instr
+    [(Instr 'movq (list (app get-val (? (not/c #f) s)) (app get-val (? (not/c #f) d)))) `((,s ,d))]
+    [_ '()]))
+
+(define (build_mov_graph_block block)
+  (match block
+    [(Block info code) (Block (dict-set info 'mov-graph (undirected-graph (append-map get_mov_related code))) code)]))
+
+(define (build_mov_graph p)
+  (match p
+    [(X86Program info blocks) (X86Program info (for/list ([block blocks]) `(,(car block) . ,(build_mov_graph_block (cdr block)))))]))
+
 
 (define (assign-home-atm e locs)
   (match e
@@ -299,7 +313,7 @@
          [locs (for/list ([var ltypes])
                  (cons var (color->loc (dict-ref colors var) (set-count used-callee))))]
          )
-    (printf "nreg: ~a nloc: ~a nstack: ~a used-callee: ~a locs: ~a~n" nreg nloc nstack used-callee locs)
+    ;; (printf "nreg: ~a nloc: ~a nstack: ~a used-callee: ~a locs: ~a~n" nreg nloc nstack used-callee locs)
     (values nstack used-callee locs)))
 ;; assign-homes : x86var -> x86var
 ;; (define (assign-homes p)
@@ -376,12 +390,33 @@
       (dict-set* body 'main (generate-prelude info) 'conclusion (generate-conclusion info)))]))
 
 (define reg-set (list->set (range 0 (num-registers-for-alloc))))
-(define (dsatur g)
+(define (dsatur g m)
   (let* ([colors (make-hash (reg-colors))]
          [get-satur (lambda (v)
-                      (filter-map (lambda (d) (dict-ref colors d #f)) (sequence->list (in-neighbors g v))))]
+                      (list->set (filter-map (lambda (d) (dict-ref colors d #f)) (sequence->list (in-neighbors g v)))))]
+         [get-mov-color (lambda (v)
+                          (if (has-vertex? m v)
+                              (list->set (filter-map (lambda (d) (let ([color (dict-ref colors d -1)])
+                                                              (if (< color 0) #f color))) (sequence->list (in-neighbors m v))))
+                              (set))
+                          )]
+         [get-color (lambda (sat-set)
+                      (define (get-n lst n)
+                        (match lst
+                          [`(,x . ,rest) #:when (> n x) (get-n rest n)]
+                          [`(,x . ,rest) #:when (= x n) (get-n rest (add1 n))]
+                          [_ n]))
+                      (get-n (sort (set->list sat-set) <) 0))]
+         [get-avail-mov-color (lambda (v [satur (get-satur v)] )
+                                (set-subtract (get-mov-color v) satur))]
          [cmp (lambda (x y)
-                (>= (length (get-satur x)) (length (get-satur y))))]
+                (let* ([saturx (get-satur x)]
+                       [satury (get-satur y)]
+                       [lx (set-count saturx)]
+                       [ly (set-count satury)])
+                  (if (equal? lx ly)
+                      (>= (set-count (get-avail-mov-color x saturx)) (set-count (get-avail-mov-color y satury)))
+                      (> lx ly))))]
          [set-color! (lambda (loc color)
                        (dict-set! colors loc color))]
          [pq (make-pqueue cmp)]
@@ -393,10 +428,25 @@
       (for ([_ (in-range (pqueue-count pq))])
         (let* ([most (pqueue-pop! pq)]
                [satur (get-satur most)]
-               [maxloc (add1 (argmax identity satur))]
-               [availregset (set-subtract reg-set (list->set satur))]
-               [color (if (> (set-count availregset) 0) (argmin identity (set->list availregset)) maxloc)])
+               ;; [maxloc (add1 (argmax identity satur))]
+               ;; [availregset (set-subtract reg-set (list->set satur))]
+               ;; [color (if (> (set-count availregset) 0) (argmin identity (set->list availregset)) maxloc)]
+               [color (let* ([naivecolor (get-color satur)]
+                             [movcolors (get-avail-mov-color most satur)])
+                        (if (= (set-count movcolors) 0)
+                            naivecolor
+                            (let ([movcolor (argmin identity (set->list movcolors))])
+                              (if (> movcolor (num-registers-for-alloc))
+                                  (min movcolor naivecolor)
+                                  movcolor))))])
           ;; (debug 'most most)
+          ;; (if (set-member? satur color)
+          ;;     (printf "ERROR EROOR ~a ~a~n" color satur)
+          ;;     (void))
+          ;; (if (not (equal? color (get-color satur)))
+          ;;     (printf "NOT EQ ~a ~a ~a~n" most color (get-color satur))
+          ;;     (void))
+          ;;
           ;; (printf "most ~a: ~a: color: ~a~n" most satur color)
           ;; (printf "maxloc: ~a color: ~a availregset: ~a~n" maxloc color availregset)
           (unless (dict-has-key? colors most)
@@ -407,7 +457,7 @@
 
 (define (reg-color-block b)
   (match b
-    [(Block info code) (Block (dict-set info 'colors (dsatur (dict-ref info 'conflicts))) code)]))
+    [(Block info code) (Block (dict-set info 'colors (dsatur (dict-ref info 'conflicts) (dict-ref info 'mov-graph))) code)]))
 
 (define (reg-color p)
   (match p
@@ -430,6 +480,7 @@
     ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
     ("uncover live" ,uncover_live ,interp-pseudo-x86-0)
     ("build interference" ,build_interference ,interp-pseudo-x86-0)
+    ("build mov graph" ,build_mov_graph ,interp-pseudo-x86-0)
     ("reg-color" ,reg-color ,interp-pseudo-x86-0)
     ("assign homes" ,assign-homes ,interp-x86-0)
     ("patch instructions" ,patch-instructions ,interp-x86-0)

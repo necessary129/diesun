@@ -385,6 +385,11 @@ Changelog:
          (newline port)
          (print-dot data port)
          ]
+        ['mov-graph
+         (write-string "mov-graph:" port)
+         (newline port)
+         (print-dot data port)
+         ]
         [else
          (write-string (symbol->string label) port)
          (write-string ":" port)

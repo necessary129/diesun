@@ -15820,7 +15820,7 @@ fuzz() {
 		echo "$(( ((res % 256) + 256) % 256 ))" >"${testname}.res"
 		tail -n +2 "${testname}.rkt" >"${testname}1.rkt"
 		rm "${testname}.rkt" && mv "${testname}1.rkt" "${testname}.rkt"
-		racket fuzz-test.rkt "var${pid}" 2>&1 | grep 'FAILURE' && break
+		racket fuzz-test.rkt "var${pid}" 2>&1 | tee "fuzz.${pid}.out" | grep 'FAILURE' && break
 		test "${PIPESTATUS[0]}" -eq 0 || break
 		rm "${testname}.in"
 	done
@@ -15833,6 +15833,9 @@ fuzz() {
 	echo "=== RES ==="
 	cat "${testname}.res"
 	echo "=== END RES ==="
+    echo "=== FUZZ TEST OUT ==="
+    cat "fuzz.${pid}.out"
+    echo "=== END FUZZ TEST OUT ==="
 	racket fuzz-test-debug.rkt "var${pid}"
 	exit 1
 }
