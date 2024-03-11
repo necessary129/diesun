@@ -19,6 +19,11 @@ cd /scratch/shamil-com
 
 cp -r $HOME/compilers-s24-racket-x86-diesun ./compilers
 cd compilers
+export PATH=$HOME/racket/bin:$PATH
+
+echo "Compiling testing files"
+raco make -j $(nproc) fuzz-smith.rkt fuzz-test.rkt fuzz-test-debug.rkt
+echo "Finished compiling testing files"
 
 secs_to_human(){
     echo "$(( ${1} / 3600 )):$(( (${1} / 60) % 60 )):$(( ${1} % 60 ))"
