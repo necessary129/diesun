@@ -16,21 +16,24 @@
 (require "priority_queue.rkt")
 (provide (all-defined-out))
 (define reserved-registers (set 'rax 'r11 'r15 'rsp 'rbp))
-(define (uniquify-exp env) ;; TODO: this function currently does nothing. Your code goes here
+(define (uniquify-exp env)
   (lambda (e)
+    (define recur (uniquify-exp env))
     (match e
       [(Var x) (Var (dict-ref env x))]
       [(Int n) (Int n)]
+      [(Bool _) e]
+      [(If c t e) (If (recur c) (recur t) (recur e))]
       [(Let x e body)
        (let* ([newvar (gensym x)]
-              [newexp ((uniquify-exp env) e)]
+              [newexp (recur e)]
               [newenv (dict-set env x newvar)]
               [newbody ((uniquify-exp newenv) body)])
          (Let newvar newexp newbody))]
       [(Prim op es)
        (Prim op
              (for/list ([e es])
-               ((uniquify-exp env) e)))]
+               (recur e)))]
       [_ e])))
 
 ;; uniquify : Lvar -> Lvar
@@ -493,7 +496,7 @@
   `(
     ("Shrink" ,shrink ,interp-Lif ,type-check-Lif)
     ; ("Partial eval" ,partial-eval ,interp-Lvar ,type-check-Lvar)
-    ; ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
+    ("uniquify" ,uniquify ,interp-Lif ,type-check-Lif)
     ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
     ; ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
