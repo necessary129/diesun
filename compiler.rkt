@@ -7,9 +7,11 @@
 (require "interp-Lint.rkt")
 (require "interp-Lvar.rkt")
 (require "interp-Cvar.rkt")
+(require "interp-Lif.rkt")
 (require "interp.rkt")
 (require "type-check-Lvar.rkt")
 (require "type-check-Cvar.rkt")
+(require "type-check-Lif.rkt")
 (require "utilities.rkt")
 (require "priority_queue.rkt")
 (provide (all-defined-out))
@@ -94,12 +96,12 @@
 
 (define (shrink-exp p)
   (match p
-    [(Prim 'and (list t1 t2)) (If (shrink-exp t1) (shrink-exp t2) #f)]
-    [(Prim 'or (list t1 t2)) (If (shrink-exp t1) #t (shrink-exp t2))]
+    [(Prim 'and (list t1 t2)) (If (shrink-exp t1) (shrink-exp t2) (Bool #f))]
+    [(Prim 'or (list t1 t2)) (If (shrink-exp t1) (Bool #t) (shrink-exp t2))]
     [(Var _) p]
     [(Int _) p]
     [(Bool _) p]
-    [(Let y rhs body) (Let (shrink-exp y) (shrink-exp rhs) (shrink-exp body))]
+    [(Let y rhs body) (Let y (shrink-exp rhs) (shrink-exp body))]
     [(Prim op es) (Prim op (map shrink-exp es))]
     [(If c t e) (If (shrink-exp c) (shrink-exp t) (shrink-exp e))]
     [_ (error "shrink-exp unhandled case" p)]
@@ -489,7 +491,7 @@
 (define compiler-passes
   ;; Uncomment the following passes as you finish them.
   `(
-    ("Shrink" ,shrink ,interp_Lif ,type-check-Lif)
+    ("Shrink" ,shrink ,interp-Lif ,type-check-Lif)
     ; ("Partial eval" ,partial-eval ,interp-Lvar ,type-check-Lvar)
     ; ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
     ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)

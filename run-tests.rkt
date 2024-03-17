@@ -4,6 +4,8 @@
 (require "utilities.rkt")
 (require "interp-Lvar.rkt")
 (require "interp-Cvar.rkt")
+(require "interp-Lif.rkt")
+(require "type-check-Lif.rkt")
 (require "interp.rkt")
 (require "compiler.rkt")
 
@@ -26,7 +28,7 @@
         all-tests)))
 
 ;; The following tests the intermediate-language outputs of the passes.
-(interp-tests "cond" #f compiler-passes interp-Lif "cond_test" (tests-for "cond"))
+(interp-tests "cond" type-check-Lif compiler-passes interp-Lif "cond_test" (tests-for "cond"))
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.
