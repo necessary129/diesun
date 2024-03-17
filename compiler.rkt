@@ -88,6 +88,24 @@
     [(Prim op es) (Seq (Assign (Var x) (Prim op es)) cont)]
     [_ (error "explicate_assign unhandled case" e)]))
 
+(define (shrink p)
+  (match p
+    [(Program info e) (Program info (shrink-exp e))]))
+
+(define (shrink-exp p)
+  (match p
+    [(Prim 'and (list t1 t2)) (If (shrink-exp t1) (shrink-exp t2) #f)]
+    [(Prim 'or (list t1 t2)) (If (shrink-exp t1) #t (shrink-exp t2))]
+    [(Var _) p]
+    [(Int _) p]
+    [(Bool _) p]
+    [(Let y rhs body) (Let (shrink-exp y) (shrink-exp rhs) (shrink-exp body))]
+    [(Prim op es) (Prim op (map shrink-exp es))]
+    [(If c t e) (If (shrink-exp c) (shrink-exp t) (shrink-exp e))]
+    [_ (error "shrink-exp unhandled case" p)]
+  )
+)
+
 (define (pe_add env)
   (lambda (r1 r2)
     (match* (r1 r2)
@@ -465,23 +483,23 @@
                                                                            (car block)
                                                                            (reg-color-block (cdr block)))))]))
 
-
-
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
 ;; must be named "compiler.rkt"
 (define compiler-passes
   ;; Uncomment the following passes as you finish them.
   `(
-    ("Partial eval" ,partial-eval ,interp-Lvar ,type-check-Lvar)
-    ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
-    ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
-    ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
-    ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
-    ("uncover live" ,uncover_live ,interp-pseudo-x86-0)
-    ("build interference" ,build_interference ,interp-pseudo-x86-0)
-    ("build mov graph" ,build_mov_graph ,interp-pseudo-x86-0)
-    ("reg-color" ,reg-color ,interp-pseudo-x86-0)
-    ("assign homes" ,assign-homes ,interp-x86-0)
-    ("patch instructions" ,patch-instructions ,interp-x86-0)
-    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)))
+    ("Shrink" ,shrink ,interp_Lif ,type-check-Lif)
+    ; ("Partial eval" ,partial-eval ,interp-Lvar ,type-check-Lvar)
+    ; ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
+    ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
+    ; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
+    ; ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
+    ; ("uncover live" ,uncover_live ,interp-pseudo-x86-0)
+    ; ("build interference" ,build_interference ,interp-pseudo-x86-0)
+    ; ("build mov graph" ,build_mov_graph ,interp-pseudo-x86-0)
+    ; ("reg-color" ,reg-color ,interp-pseudo-x86-0)
+    ; ("assign homes" ,assign-homes ,interp-x86-0)
+    ; ("patch instructions" ,patch-instructions ,interp-x86-0)
+    ; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+    ))
