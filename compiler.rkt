@@ -55,7 +55,7 @@
     [(Int _) (values e '())]
     [(Bool _) (values e '())]
     [(If c t e) (let ([tmpvar (gensym 'tmp)])
-                  (values (Var tmpvar) `(,tmpvar . ,(If (rco_exp c) (rco_exp t) (rco_exp e)))))]
+                  (values (Var tmpvar) `((,tmpvar . ,(If (rco_exp c) (rco_exp t) (rco_exp e))))))]
     [(Let x e body)
      (let ([tmpvar (gensym 'tmp)] [newe (rco_exp e)] [newbody (rco_exp body)])
        (values (Var tmpvar) `((,tmpvar . ,(Let x newe newbody)))))]
