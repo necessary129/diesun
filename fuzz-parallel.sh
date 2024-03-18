@@ -15817,7 +15817,12 @@ fuzz() {
 			echo $RANDOM >>"${testname}.in"
 		done
 		res="$(racket ${testname}.rkt <${testname}.in)"
-		echo "$(( ((res % 256) + 256) % 256 ))" >"${testname}.res"
+        case $res in
+            "#f") reso="#f" ;;
+            "#t") reso="#t" ;;
+            *) reso="$(( ((res % 256) + 256) % 256 ))" ;;
+        esac
+		echo "$reso" > "${testname}.res"
 		tail -n +2 "${testname}.rkt" >"${testname}1.rkt"
 		rm "${testname}.rkt" && mv "${testname}1.rkt" "${testname}.rkt"
 		racket fuzz-test.rkt "var${pid}" 2>&1 | tee "fuzz.${pid}.out" | grep 'FAILURE' && break
