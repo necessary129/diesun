@@ -15,6 +15,7 @@
              #:prop binder-info ()]
  [Expression #f ()
              #:prop may-be-generated #f]
+ [Program #f (LetStar)]
  [LetStar Expression ([definitions : Definition *]
 
                       Expression)
@@ -25,9 +26,11 @@
  ;;             #:prop reference-info (write)]
  [LiteralInt Expression ([v = (random-bits 40)])]
  [Addition Expression ([es : Expression * = 2])
-           #:prop choice-weight 25]
+           ;; #:prop choice-weight 25
+           ]
  [Subtraction Expression ([es : Expression * = 2])
-              #:prop choice-weight 25]
+              ;; #:prop choice-weight 25
+              ]
  [PrimRead Expression ()]
  [LiteralBool Expression ([v = (random-bool)])]
  [Comparison Expression () #:prop may-be-generated #f]
@@ -66,9 +69,9 @@
  [LteComparison [bool (lambda (n t)
                         (hash 'l int
                               'r int))]]
-[LtComparison [bool (lambda (n t)
-                        (hash 'l int
-                              'r int))]]
+ [LtComparison [bool (lambda (n t)
+                       (hash 'l int
+                             'r int))]]
  [GtComparison [bool (lambda (n t)
                        (hash 'l int
                              'r int))]]
@@ -89,6 +92,7 @@
                                         'else t))]]
  [LiteralBool [bool (lambda (n t) (hash))]]
 
+ [Program [int (lambda (n t) (hash 'LetStar int))]]
 
  [Subtraction [int (λ (n t) (hash 'es t))]])
 
@@ -108,6 +112,8 @@
  ;;       ,@(map (λ (c) ($xsmith_render-node c))
  ;;              (ast-children (ast-child 'sideEs n)))
  ;;       ,($xsmith_render-node (ast-child 'Expression n))))]
+ [Program (lambda (n)
+            ($xsmith_render-node (ast-child 'LetStar n)))]
  [LetStar (lambda (n)
             (foldr (lambda (d res)
                      `(let ([,(string->symbol (ast-child 'name d))
@@ -132,15 +138,15 @@
  [LteComparison (lambda (n) `(<= ,($xsmith_render-node (ast-child 'l n))
                                  ,($xsmith_render-node (ast-child 'r n))))]
  [LtComparison (lambda (n) `(< ,($xsmith_render-node (ast-child 'l n))
-                                 ,($xsmith_render-node (ast-child 'r n))))]
+                               ,($xsmith_render-node (ast-child 'r n))))]
  [GteComparison (lambda (n) `(>= ,($xsmith_render-node (ast-child 'l n))
                                  ,($xsmith_render-node (ast-child 'r n))))]
  [GtComparison (lambda (n) `(> ,($xsmith_render-node (ast-child 'l n))
-                                 ,($xsmith_render-node (ast-child 'r n))))]
+                               ,($xsmith_render-node (ast-child 'r n))))]
  [OpAnd (lambda (n) `(and ,($xsmith_render-node (ast-child 'l n))
-                                 ,($xsmith_render-node (ast-child 'r n))))]
+                          ,($xsmith_render-node (ast-child 'r n))))]
  [OpOr (lambda (n) `(or ,($xsmith_render-node (ast-child 'l n))
-                                 ,($xsmith_render-node (ast-child 'r n))))]
+                        ,($xsmith_render-node (ast-child 'r n))))]
  [OpNot (lambda (n) `(not ,($xsmith_render-node (ast-child 'e n))))]
  [IfStmt (lambda (n) `(if ,($xsmith_render-node (ast-child 'cond n))
                           ,($xsmith_render-node (ast-child 'then n))
@@ -151,7 +157,7 @@
 ;; This line defines `arith-command-line`.
 (define-xsmith-interface-functions
   [arith]
-  #:program-node LetStar
+  #:program-node Program
   #:type-thunks (list (λ () int) (lambda () bool))
   #:comment-wrap (λ (lines)
                    (string-join
