@@ -125,10 +125,11 @@
     [else (error "explicate_pred unhandled case " cnd)]))
 
 (define (explicate-control p)
-  (match p
-    [(Program info body) (let ([startblock (explicate_tail body)])
-                           (get-basic-blocks (cons `(start . ,startblock) (get-basic-blocks)))
-                           (CProgram info (get-basic-blocks)))]))
+  (parameterize ([get-basic-blocks '()])
+    (match p
+      [(Program info body) (let ([startblock (explicate_tail body)])
+                             (get-basic-blocks (cons `(start . ,startblock) (get-basic-blocks)))
+                             (CProgram info (get-basic-blocks)))])))
 
 (define (shrink p)
   (match p
