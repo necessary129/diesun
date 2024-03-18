@@ -73,6 +73,7 @@
     [(Prim op es)
      (match-let ([(list aexps binds) (accumulate_aexps es)])
        (makeMultiLet binds (Prim op aexps)))]
+    [(If c t e) (If (rco_exp c) (rco_exp t) (rco_exp e))]
     [_ e]))
 
 ;; remove-complex-opera* : Lvar -> Lvar^mon
