@@ -8,10 +8,12 @@
 (require "interp-Lvar.rkt")
 (require "interp-Cvar.rkt")
 (require "interp-Lif.rkt")
+(require "interp-Cif.rkt")
 (require "interp.rkt")
 (require "type-check-Lvar.rkt")
 (require "type-check-Cvar.rkt")
 (require "type-check-Lif.rkt")
+(require "type-check-Cif.rkt")
 (require "utilities.rkt")
 (require "priority_queue.rkt")
 (provide (all-defined-out))
@@ -87,6 +89,8 @@
     [(Int n) (Return (Int n))]
     [(Let x rhs body) (explicate_assign rhs x (explicate_tail body))]
     [(Prim op es) (Return (Prim op es))]
+    [(Bool b) (Return (Bool b))]
+    [(If cnd thn els) (explicate_pred cnd (explicate_tail thn) (explicate_tail els))]
     [_ (error "explicate_tail unhandled case" e)]))
 
 (define (explicate_assign e x cont)
@@ -95,7 +99,36 @@
     [(Int n) (Seq (Assign (Var x) (Int n)) cont)]
     [(Let y rhs body) (explicate_assign rhs y (explicate_assign body x cont))]
     [(Prim op es) (Seq (Assign (Var x) (Prim op es)) cont)]
+    [(Bool b) (Seq (Assign (Var x) (Bool b)) cont)]
+    [(If cnd thn els) (explicate_pred cnd (explicate_assign thn x cont) (explicate_assign els x cont))]
     [_ (error "explicate_assign unhandled case" e)]))
+
+(define (create_block tail)
+  (match tail
+    [(Goto _) tail]
+    [else
+     (let ([label (gensym 'block)])
+       (get-basic-blocks (cons (cons label tail) (get-basic-blocks)))
+       (Goto label))]))
+
+(define (explicate_pred cnd thn els)
+  (match cnd
+    [(Var x) (IfStmt (Prim 'eq? (list (Var x) (Bool #t))) (create_block thn) (create_block els))]
+    [(Let x rhs body) (explicate_assign rhs x (explicate_pred body thn els))]
+    [(Prim 'not (list e)) (explicate_pred e els thn)]
+    [(Prim (? (or/c 'eq? '< '> '<= '>=) op) es) (IfStmt (Prim op es) (create_block thn) (create_block els))]
+    [(Bool b) (if b thn els)]
+    [(If ncnd nthn nels) (let ([thnblock (create_block thn)] [elsblock (create_block els)])
+                           (explicate_pred ncnd
+                                           (explicate_pred nthn thnblock elsblock)
+                                           (explicate_pred nels thnblock elsblock)))]
+    [else (error "explicate_pred unhandled case " cnd)]))
+
+(define (explicate-control p)
+  (match p
+    [(Program info body) (let ([startblock (explicate_tail body)])
+                           (get-basic-blocks (cons `(start . ,startblock) (get-basic-blocks)))
+                           (CProgram info (get-basic-blocks)))]))
 
 (define (shrink p)
   (match p
@@ -156,9 +189,6 @@
     [(Program info e) (Program info ((pe_exp '()) e))]))
 
 ;; explicate-control : Lvar^mon -> Cvar
-(define (explicate-control p)
-  (match p
-    [(Program info body) (CProgram info `((start . ,(explicate_tail body))))]))
 
 (define (get-op-name p)
   (match p
@@ -502,7 +532,7 @@
     ; ("Partial eval" ,partial-eval ,interp-Lvar ,type-check-Lvar)
     ("uniquify" ,uniquify ,interp-Lif ,type-check-Lif)
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
-    ; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
+    ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
     ; ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
     ; ("uncover live" ,uncover_live ,interp-pseudo-x86-0)
     ; ("build interference" ,build_interference ,interp-pseudo-x86-0)
