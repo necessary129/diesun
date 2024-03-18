@@ -15809,7 +15809,7 @@ fuzz() {
 	pid=$1
 	testname="tests/var${pid}_test_zfuzz"
 	while true; do
-		racket fuzz-smith.rkt --max-depth 25 --type-max-depth 25 >>"${testname}.rkt"
+		racket fuzz-smith.rkt --max-depth 25 --type-max-depth 25 >"${testname}.rkt"
 		bash fuzz-genio.sh "$testname"
 		racket fuzz-test.rkt "var${pid}" 2>&1 | tee "fuzz.${pid}.out" | grep 'FAILURE' && break
 		test "${PIPESTATUS[0]}" -eq 0 || break
