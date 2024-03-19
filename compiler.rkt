@@ -482,13 +482,13 @@
 (define (patch-instr e)
   (match e
     [(Instr 'movq (list v v)) '()]
-    [Instr 'cmpq (list e1 (Imm e2))
+    [(Instr 'cmpq (list e1 (Imm e2)))
            (list (Instr 'movq (list (Imm e2) (Reg 'rax)))
                   (Instr 'cmpq (list e1 (Reg 'rax))))]
-    [Instr 'cmpq (list (Deref r1 o1) (Deref r2 o2))
+    [(Instr 'cmpq (list (Deref r1 o1) (Deref r2 o2)))
            (list (Instr 'movq (list (Deref r2 o2) (Reg 'rax)))
                  (Instr 'cmpq (list (Deref r1 o1) (Reg 'rax))))]
-    [Instr 'movbzq (list e1 (Deref r2 o2))
+    [(Instr 'movbzq (list e1 (Deref r2 o2)))
            (list (Instr 'movbzq (list e1 (Reg 'rax)))
                  (Instr 'movq (list (Reg 'rax) (Deref r2 o2))))]
     [(Instr op (list (Imm n1) r)) #:when (and (> (abs n1) 2147483647) (not (equal? op 'movq)))
@@ -639,5 +639,5 @@
     ("reg-color" ,reg-color ,interp-pseudo-x86-1)
     ("assign homes" ,assign-homes ,interp-x86-1)
     ("patch instructions" ,patch-instructions ,interp-x86-1)
-    ; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-1)
     ))
