@@ -16,6 +16,8 @@
 (require "type-check-Cif.rkt")
 (require "utilities.rkt")
 (require "priority_queue.rkt")
+(require "multigraph.rkt")
+(require "graph-printing.rkt")
 (provide (all-defined-out))
 (define reserved-registers (set 'rax 'r11 'r15 'rsp 'rbp))
 (define (uniquify-exp env)
@@ -196,6 +198,7 @@
     [(Prim '+ (list e1 e2)) 'addq]
     [(Prim '- (list e1 e2)) 'subq]
     [(Prim '- (list e1)) 'negq]
+    [(Prim 'not (list e1)) 'xorq]
     ; read
     ))
 
@@ -210,17 +213,37 @@
 (define (select-inst-atom p)
   (match p
     [(Int n) (Imm n)]
-    [(Var v) (Var v)]))
+    [(Var v) (Var v)]
+    [(Bool #t) (Imm 1)]
+    [(Bool #f) (Imm 0)]))
+
+(define (get-set-flag cmp)
+  (match cmp
+    ['eq? 'sete]
+    ['< 'setl]
+    ['<= 'setle]
+    ['> 'setg]
+    ['>= 'setge]
+  )
+)
 
 (define (select-inst-assgn v e)
   (match e
     [(? atm? e) (list (Instr 'movq (list (select-inst-atom e) v)))]
     [(Prim 'read '()) (list (Callq 'read_int 0) (Instr 'movq (list (Reg 'rax) v)))]
+    [(Prim (? (or/c 'eq? '< '> '<= '>=) cmp) (list e1 e2))
+     (list (Instr 'cmpq (list (select-inst-atom e2) (select-inst-atom e1)))
+           (Instr 'set (list (get-flag-name cmp) (ByteReg 'al)))
+           (Instr 'movzbq (list (ByteReg 'al) v)))]
     [(Prim op (list e1 e2))
      (list (Instr 'movq (list (select-inst-atom e1) v))
            (Instr (get-op-name e) (list (select-inst-atom e2) v)))]
+    [(Prim 'not (list e1))
+     (list (Instr 'movq (list (select-inst-atom e1) v))
+           (Instr 'xorq (list (Imm 1) v)))]
     [(Prim op (list e1))
-     (list (Instr 'movq (list (select-inst-atom e1) v)) (Instr (get-op-name e) (list v)))]))
+     (list (Instr 'movq (list (select-inst-atom e1) v))
+           (Instr (get-op-name e) (list v)))]))
 
 (define (select-inst-stmt s)
   (match s
@@ -230,15 +253,34 @@
     [(Assign (Var v) (Prim '+ (list (Var v1) a2)))
      #:when (equal? v v1)
      (list (Instr 'addq (list (select-inst-atom a2) (Var v))))]
+    [(Assign (Var v) (Prim 'not (list (Var v1))))
+      #:when (equal? v v1)
+      (list (Instr 'xorq (list (Int 1) (Var v1))))]
     [(Assign v e) (select-inst-assgn v e)]))
 
 (define (select-inst-tail tail)
   (match tail
     [(Return e) (append (select-inst-assgn (Reg 'rax) e) (list (Jmp 'conclusion)))]
-    [(Seq s t) (append (select-inst-stmt s) (select-inst-tail t))]))
+    [(Seq s t) (append (select-inst-stmt s) (select-inst-tail t))]
+    [(Goto l) (list (Jmp l))]
+    [(IfStmt (Prim cmp (list arg1 arg2)) (Goto l1) (Goto l2)) 
+     (list 
+     (Instr 'cmpq (list (select-inst-atom arg2) (select-inst-atom arg1)))
+     (JmpIf (get-flag-name cmp) l1)
+     (Jmp l2))]
+    ))
+
+(define (get-flag-name cmp)
+  (match cmp
+    ['eq? 'e]
+    ['< 'l]
+    ['<= 'le]
+    ['> 'g]
+    ['>= 'ge]
+))
 
 (define arg-regs '(rdi rsi rdx rcx r8 r9))
-(define second-read-instr (set 'addq 'subq))
+(define second-read-instr (set 'addq 'subq 'cmpq))
 
 (define (second-read? op) (set-member? second-read-instr op))
 
@@ -250,17 +292,20 @@
     [(Instr (? second-read? op) (list _ (Reg v))) (set v)]
     [_ (set)]))
 
-(define (uncover_read instr)
+(define (uncover_read instr lbl->live)
   (let ([sset (uncover_read_secondread instr)])
     (match instr
       [(Instr _ (cons (Var v) _)) (set-add sset v)]
       [(Instr _ (cons (Reg v) _)) (set-add sset v)]
       [(Callq _ arity) (list->set (take arg-regs arity))]
-      [(Jmp 'conclusion) (set 'rax 'rsp)]
+      [(Jmp label) (dict-ref lbl->live label)]
+      [(JmpIf _ label) (dict-ref lbl->live label)]
       [_ (set)])))
 
 (define (uncover_write instr)
   (match instr
+    [(Instr 'cmpq _) (set)]
+    [(Instr 'set (list _ (ByteReg b))) (set (byte-reg->full-reg b))]
     [(Instr _ (list _ (Var v))) (set v)]
     [(Instr _ (list _ (Reg v))) (set v)]
     [(Instr _ (list (Var v))) (set v)]
@@ -268,44 +313,85 @@
     [(Callq _ _) caller-save]
     [_ (set)]))
 
-(define (get_live code ini)
+(define (get_live code ini lbl->live)
   (foldr (lambda (instr lset)
            (cons
-            (set-union (set-subtract (car lset) (uncover_write instr)) (uncover_read instr))
+            (set-union (set-subtract (car lset) (uncover_write instr)) (uncover_read instr lbl->live))
             lset))
          (list ini) code))
 
-(define (uncover_block b)
+(define (uncover_block b lbl->live [ini (set)])
   (match b
-    [(Block info code) (Block (dict-set info 'lafter (cdr (get_live code (set)))) code)]))
+    [(Block info code) (let ([livesets (get_live code ini lbl->live)])
+                         (Block (dict-set* info 'lbefore (car livesets) 'lafter (cdr livesets)) code))]))
 
 (define (uncover_live p)
   (match p
     [(X86Program info blocks)
-     (X86Program info
-                 (for/list ([block blocks]) `(,(car block) . ,(uncover_block (cdr block)))))]))
+     (let* ([cfg (build_cfg blocks)]
+            [vert-list (tsort (transpose cfg))]
+            [label->live (dict-set '() 'conclusion (set 'rax 'rsp))])
+       ;; (printf "cfg: ~a vert: ~a~n" cfg vert-list)
+       ;; (print-graph cfg)
+       (define uncover (lambda (vlist nblocks lbl->live)
+                         (match vlist
+                           [`(conclusion . ,rest) (uncover rest nblocks lbl->live)]
+                           [`(,v . ,rest) (let ([newblock (uncover_block (dict-ref blocks v) lbl->live)])
+                                            (uncover rest (cons (cons v newblock) nblocks) (dict-set lbl->live v (dict-ref (Block-info newblock) 'lbefore))))]
+                           ['() (values nblocks lbl->live)])))
+       ;; (for ([v vert-list])
+       ;;   (unless (equal? v 'conclusion)
+       ;;     (let ([newblock (uncover_block (dict-ref blocks v) label->live)])
+       ;;       (dict-set! label->live v (dict-ref (Block-info newblock) 'lbefore))
+       ;;       (dict-set! newblocks v newblock))))
+       (define-values (nblocks lbl-live) (uncover vert-list '() label->live))
+       (X86Program (dict-set info 'label->live lbl-live) nblocks))]))
+
+(define (build_cfg blocks)
+  (let* ([get_succ (lambda (code)
+                     (foldl (lambda (instr succset)
+                              (match instr
+                                [(Jmp label) ;; #:when (not (equal? label 'conclusion))
+                                  (set-add succset label)
+                                 ]
+                                [(JmpIf _ label) (set-add succset label)]
+                                [_ succset]))
+                            (set) code))]
+         [get_edge_list (lambda (blockpair)
+                          (let ([label (car blockpair)] [block (cdr blockpair)])
+                            (for/list ([v (set->list (get_succ (Block-instr* block)))])
+                              (list label v))))])
+    (printf "gra: ~a~n" (append-map get_edge_list blocks))
+    (make-multigraph (append-map get_edge_list blocks))))
 
 (define (get-val loc)
   (match loc
     [(Var v) v]
     [(Reg v) v]
+    [(ByteReg b) (byte-reg->full-reg b)]
     [_ #f]))
 
 (define (get_edge_instr instr lafter)
   (match instr
     [(Instr 'movq (list (app get-val s) (app get-val d))) (for/list ([v lafter] #:unless (and (equal? s d) ((or/c s d) v)))
                                 `(,v ,d))]
+    [(Instr 'movzbq (list (app get-val s) (app get-val d))) (for/list ([v lafter] #:unless (and (equal? s d) ((or/c s d) v)))
+                                `(,v ,d))]
     [_ (let ([Wset (uncover_write instr)])
          (for*/list ([v lafter] [d (set->list Wset)] #:unless (equal? d v))
            `(,v ,d)))]))
 
-(define (build_interblock code lafterlist)
-  (undirected-graph (append-map get_edge_instr code lafterlist)))
+(define (loc-hack lafterlist)
+  (for/list ([v (set->list (apply set-union lafterlist))])
+    `(,v ,v)))
+
+(define (build_interblock code lbefore lafterlist)
+  (undirected-graph (append (loc-hack (cons lbefore lafterlist)) (append-map get_edge_instr code lafterlist))))
 
 (define (build_interference_block block)
   (match block
     [(Block info code) (Block
-                        (dict-set info 'conflicts (build_interblock code (dict-ref info 'lafter))) code)]))
+                        (dict-set info 'conflicts (build_interblock code (dict-ref info 'lbefore) (dict-ref info 'lafter))) code)]))
 
 (define (build_interference p)
   (match p
@@ -371,7 +457,7 @@
          [locs (for/list ([var ltypes])
                  (cons var (color->loc (dict-ref colors var) (set-count used-callee))))]
          )
-    ;; (printf "nreg: ~a nloc: ~a nstack: ~a used-callee: ~a locs: ~a~n" nreg nloc nstack used-callee locs)
+    (printf "nreg: ~a nloc: ~a nstack: ~a used-callee: ~a locs: ~a~n" nreg nloc nstack used-callee locs)
     (values nstack used-callee locs)))
 ;; assign-homes : x86var -> x86var
 ;; (define (assign-homes p)
@@ -396,6 +482,15 @@
 (define (patch-instr e)
   (match e
     [(Instr 'movq (list v v)) '()]
+    [(Instr 'cmpq (list e1 (Imm e2)))
+           (list (Instr 'movq (list (Imm e2) (Reg 'rax)))
+                  (Instr 'cmpq (list e1 (Reg 'rax))))]
+    [(Instr 'cmpq (list (Deref r1 o1) (Deref r2 o2)))
+           (list (Instr 'movq (list (Deref r2 o2) (Reg 'rax)))
+                 (Instr 'cmpq (list (Deref r1 o1) (Reg 'rax))))]
+    [(Instr 'movbzq (list e1 (Deref r2 o2)))
+           (list (Instr 'movbzq (list e1 (Reg 'rax)))
+                 (Instr 'movq (list (Reg 'rax) (Deref r2 o2))))]
     [(Instr op (list (Imm n1) r)) #:when (and (> (abs n1) 2147483647) (not (equal? op 'movq)))
                                   (list (Instr 'movq (list (Imm n1) (Reg 'r11))) (Instr op (list (Reg 'r11) r)))]
     [(Instr op (list (Deref r1 o1) (Deref r2 o2)))
@@ -534,12 +629,15 @@
     ("uniquify" ,uniquify ,interp-Lif ,type-check-Lif)
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
     ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
+    ("select instructions" , select-instructions ,interp-pseudo-x86-1)
+    ("uncover live" ,uncover_live ,interp-pseudo-x86-1)
+    ;; ("build_interference" ,build_interference ,interp-pseudo-x86-1)
+    ; ("allocate_registers" ,assign-homes ,interp-pseudo-x86-1)
     ; ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
-    ; ("uncover live" ,uncover_live ,interp-pseudo-x86-0)
-    ; ("build interference" ,build_interference ,interp-pseudo-x86-0)
-    ; ("build mov graph" ,build_mov_graph ,interp-pseudo-x86-0)
-    ; ("reg-color" ,reg-color ,interp-pseudo-x86-0)
-    ; ("assign homes" ,assign-homes ,interp-x86-0)
-    ; ("patch instructions" ,patch-instructions ,interp-x86-0)
-    ; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+    ("build interference" ,build_interference ,interp-pseudo-x86-1)
+    ("build mov graph" ,build_mov_graph ,interp-pseudo-x86-1)
+    ("reg-color" ,reg-color ,interp-pseudo-x86-1)
+    ("assign homes" ,assign-homes ,interp-x86-1)
+    ("patch instructions" ,patch-instructions ,interp-x86-1)
+    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-1)
     ))
