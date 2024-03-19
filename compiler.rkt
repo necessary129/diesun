@@ -366,11 +366,14 @@
   (match loc
     [(Var v) v]
     [(Reg v) v]
+    [(ByteReg b) (byte-reg->full-reg b)]
     [_ #f]))
 
 (define (get_edge_instr instr lafter)
   (match instr
     [(Instr 'movq (list (app get-val s) (app get-val d))) (for/list ([v lafter] #:unless (and (equal? s d) ((or/c s d) v)))
+                                `(,v ,d))]
+    [(Instr 'movzbq (list (app get-val s) (app get-val d))) (for/list ([v lafter] #:unless (and (equal? s d) ((or/c s d) v)))
                                 `(,v ,d))]
     [_ (let ([Wset (uncover_write instr)])
          (for*/list ([v lafter] [d (set->list Wset)] #:unless (equal? d v))
@@ -612,12 +615,14 @@
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
     ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
     ("select instructions" , select-instructions ,interp-pseudo-x86-1)
-    ; ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
     ("uncover live" ,uncover_live ,interp-pseudo-x86-1)
+    ("build_interference" ,build_interference ,interp-pseudo-x86-1)
+    ; ("allocate_registers" ,assign-homes ,interp-pseudo-x86-1)
+    ; ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
     ; ("build interference" ,build_interference ,interp-pseudo-x86-0)
-    ; ("build mov graph" ,build_mov_graph ,interp-pseudo-x86-0)
-    ; ("reg-color" ,reg-color ,interp-pseudo-x86-0)
-    ; ("assign homes" ,assign-homes ,interp-x86-0)
+    ("build mov graph" ,build_mov_graph ,interp-pseudo-x86-1)
+    ("reg-color" ,reg-color ,interp-pseudo-x86-1)
+    ("assign homes" ,assign-homes ,interp-x86-1)
     ; ("patch instructions" ,patch-instructions ,interp-x86-0)
     ; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
     ))
