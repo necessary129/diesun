@@ -196,6 +196,7 @@
     [(Prim '+ (list e1 e2)) 'addq]
     [(Prim '- (list e1 e2)) 'subq]
     [(Prim '- (list e1)) 'negq]
+    [(Prim 'not (list e1)) 'xorq]
     ; read
     ))
 
@@ -210,17 +211,34 @@
 (define (select-inst-atom p)
   (match p
     [(Int n) (Imm n)]
-    [(Var v) (Var v)]))
+    [(Var v) (Var v)]
+    [(Bool #t) (Imm 1)]
+    [(Bool #f) (Imm 0)]))
+
+(define (get-set-flag cmp)
+  (match cmp
+    ['eq? 'sete]
+    ['< 'setl]
+    ['<= 'setle]
+    ['> 'setg]
+    ['>= 'setge]
+  )
+)
 
 (define (select-inst-assgn v e)
   (match e
     [(? atm? e) (list (Instr 'movq (list (select-inst-atom e) v)))]
     [(Prim 'read '()) (list (Callq 'read_int 0) (Instr 'movq (list (Reg 'rax) v)))]
+    [(Prim (? (or/c 'eq? '< '> '<= '>=) cmp) (list e1 e2))
+     (list (Instr 'cmpq (list (select-inst-atom e2) (select-inst-atom e1)))
+           (Instr 'set (list (get-flag-name cmp) (ByteReg 'al)))
+           (Instr 'movzbq (list (ByteReg 'al) v)))]
     [(Prim op (list e1 e2))
      (list (Instr 'movq (list (select-inst-atom e1) v))
            (Instr (get-op-name e) (list (select-inst-atom e2) v)))]
     [(Prim op (list e1))
-     (list (Instr 'movq (list (select-inst-atom e1) v)) (Instr (get-op-name e) (list v)))]))
+     (list (Instr 'movq (list (select-inst-atom e1) v)) 
+           (Instr (get-op-name e) (list v)))]))
 
 (define (select-inst-stmt s)
   (match s
@@ -230,12 +248,31 @@
     [(Assign (Var v) (Prim '+ (list (Var v1) a2)))
      #:when (equal? v v1)
      (list (Instr 'addq (list (select-inst-atom a2) (Var v))))]
+    [(Assign (Var v) (Prim 'not (list (Var v1))))
+      #:when (equal? v v1)
+      (list (Instr 'xorq (list (Int 1) (Var v1))))]
     [(Assign v e) (select-inst-assgn v e)]))
 
 (define (select-inst-tail tail)
   (match tail
     [(Return e) (append (select-inst-assgn (Reg 'rax) e) (list (Jmp 'conclusion)))]
-    [(Seq s t) (append (select-inst-stmt s) (select-inst-tail t))]))
+    [(Seq s t) (append (select-inst-stmt s) (select-inst-tail t))]
+    [(Goto l) (Jmp l)]
+    [(IfStmt (Prim cmp (list arg1 arg2)) (Goto l1) (Goto l2)) 
+     (list 
+     (Instr 'cmpq (list (select-inst-atom arg2) (select-inst-atom arg1)))
+     (JmpIf (get-flag-name cmp) l1)
+     (Jmp l2))]
+    ))
+
+(define (get-flag-name cmp)
+  (match cmp
+    ['eq? 'e]
+    ['< 'l]
+    ['<= 'le]
+    ['> 'g]
+    ['>= 'ge]
+))
 
 (define arg-regs '(rdi rsi rdx rcx r8 r9))
 (define second-read-instr (set 'addq 'subq))
@@ -534,6 +571,7 @@
     ("uniquify" ,uniquify ,interp-Lif ,type-check-Lif)
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
     ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
+    ("select instructions" , select-instructions ,interp-pseudo-x86-1)
     ; ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
     ; ("uncover live" ,uncover_live ,interp-pseudo-x86-0)
     ; ("build interference" ,build_interference ,interp-pseudo-x86-0)
