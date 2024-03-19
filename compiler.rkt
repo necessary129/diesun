@@ -17,6 +17,7 @@
 (require "utilities.rkt")
 (require "priority_queue.rkt")
 (require "multigraph.rkt")
+(require "graph-printing.rkt")
 (provide (all-defined-out))
 (define reserved-registers (set 'rax 'r11 'r15 'rsp 'rbp))
 (define (uniquify-exp env)
@@ -320,33 +321,45 @@
 (define (uncover_block b lbl->live [ini (set)])
   (match b
     [(Block info code) (let ([livesets (get_live code ini lbl->live)])
-                         (Block (dict-set* info 'lbefore (car livesets) 'lafter (cdr livesets))))]))
+                         (Block (dict-set* info 'lbefore (car livesets) 'lafter (cdr livesets)) code))]))
 
 (define (uncover_live p)
   (match p
     [(X86Program info blocks)
      (let* ([cfg (build_cfg blocks)]
             [vert-list (tsort (transpose cfg))]
-            [label->live `((conclusion . ,(set 'rax 'rsp)))]
-            [newblocks '()])
-       (for ([v vert-list])
-         (let ([newblock (uncover_block (dict-ref blocks v) label->live)])
-           (dict-set! label->live v (dict-ref (Block-info newblock) 'lbefore))
-           (dict-set! newblocks v newblock)))
-       (X86Program (dict-set info 'label->live label->live) newblocks))]))
+            [label->live (dict-set '() 'conclusion (set 'rax 'rsp))])
+       ;; (printf "cfg: ~a vert: ~a~n" cfg vert-list)
+       ;; (print-graph cfg)
+       (define uncover (lambda (vlist nblocks lbl->live)
+                         (match vlist
+                           [`(conclusion . ,rest) (uncover rest nblocks lbl->live)]
+                           [`(,v . ,rest) (let ([newblock (uncover_block (dict-ref blocks v) lbl->live)])
+                                            (uncover rest (cons (cons v newblock) nblocks) (dict-set lbl->live v (dict-ref (Block-info newblock) 'lbefore))))]
+                           ['() (values nblocks lbl->live)])))
+       ;; (for ([v vert-list])
+       ;;   (unless (equal? v 'conclusion)
+       ;;     (let ([newblock (uncover_block (dict-ref blocks v) label->live)])
+       ;;       (dict-set! label->live v (dict-ref (Block-info newblock) 'lbefore))
+       ;;       (dict-set! newblocks v newblock))))
+       (define-values (nblocks lbl-live) (uncover vert-list '() label->live))
+       (X86Program (dict-set info 'label->live lbl-live) nblocks))]))
 
 (define (build_cfg blocks)
   (let* ([get_succ (lambda (code)
                      (foldl (lambda (instr succset)
                               (match instr
-                                [(Jmp label) (set-add succset label)]
+                                [(Jmp label) ;; #:when (not (equal? label 'conclusion))
+                                  (set-add succset label)
+                                 ]
                                 [(JmpIf _ label) (set-add succset label)]
                                 [_ succset]))
                             (set) code))]
          [get_edge_list (lambda (blockpair)
                           (let ([label (car blockpair)] [block (cdr blockpair)])
                             (for/list ([v (set->list (get_succ (Block-instr* block)))])
-                              (cons label v))))])
+                              (list label v))))])
+    (printf "gra: ~a~n" (append-map get_edge_list blocks))
     (make-multigraph (append-map get_edge_list blocks))))
 
 (define (get-val loc)
@@ -600,7 +613,7 @@
     ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
     ("select instructions" , select-instructions ,interp-pseudo-x86-1)
     ; ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
-    ; ("uncover live" ,uncover_live ,interp-pseudo-x86-0)
+    ("uncover live" ,uncover_live ,interp-pseudo-x86-1)
     ; ("build interference" ,build_interference ,interp-pseudo-x86-0)
     ; ("build mov graph" ,build_mov_graph ,interp-pseudo-x86-0)
     ; ("reg-color" ,reg-color ,interp-pseudo-x86-0)
