@@ -5,6 +5,8 @@
 (require "interp-Lvar.rkt")
 (require "interp-Cvar.rkt")
 (require "interp.rkt")
+(require "interp-Lif.rkt")
+(require "type-check-Lif.rkt")
 (require "compiler.rkt")
 
 (debug-level 1)
@@ -29,8 +31,8 @@
 (define test-family (string-append test-class "_test"))
 
 ;; The following tests the intermediate-language outputs of the passes.
-(interp-tests "var" #f compiler-passes interp-Lvar test-family (tests-for test-class))
+(interp-tests "cond" type-check-Lif compiler-passes interp-Lif test-family (tests-for test-class))
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.
-(compiler-tests "var" #f compiler-passes test-family (tests-for test-class))
+;; (compiler-tests "var" #f compiler-passes test-family (tests-for test-class))

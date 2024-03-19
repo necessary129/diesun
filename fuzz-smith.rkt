@@ -15,6 +15,7 @@
              #:prop binder-info ()]
  [Expression #f ()
              #:prop may-be-generated #f]
+ [Program #f (LetStar)]
  [LetStar Expression ([definitions : Definition *]
 
                       Expression)
@@ -25,14 +26,29 @@
  ;;             #:prop reference-info (write)]
  [LiteralInt Expression ([v = (random-bits 40)])]
  [Addition Expression ([es : Expression * = 2])
-           #:prop choice-weight 25]
+           ;; #:prop choice-weight 25
+           ]
  [Subtraction Expression ([es : Expression * = 2])
-              #:prop choice-weight 25]
+              ;; #:prop choice-weight 25
+              ]
  [PrimRead Expression ()]
+ [LiteralBool Expression ([v = (random-bool)])]
+ [Comparison Expression () #:prop may-be-generated #f]
+ [EqComparison Comparison ([l : Expression] [r : Expression])]
+ [LteComparison Comparison ([l : Expression] [r : Expression])]
+ [LtComparison Comparison ([l : Expression] [r : Expression])]
+ [GteComparison Comparison ([l : Expression] [r : Expression])]
+ [GtComparison Comparison ([l : Expression] [r : Expression])]
+ [OpAnd Expression ([l : Expression] [r : Expression])]
+ [OpOr Expression ([l : Expression] [r : Expression])]
+ [OpNot Expression ([e : Expression])]
+ [IfStmt Expression ([cond : Expression] [then : Expression] [else : Expression])]
  )
 
 
 (define int (base-type 'int))
+(define bool (base-type 'bool))
+
 (add-property
  arith
  type-info
@@ -46,6 +62,38 @@
  [VariableReference [(fresh-type-variable) (λ (n t) (hash))]]
  ;; [SetBangRet [(fresh-type-variable) (λ (n t) (hash 'Expression t))]]
  [Addition [int (λ (n t) (hash 'es t))]]
+ [EqComparison [bool (lambda (n t)
+                       (define arg-type (fresh-type-variable))
+                       (hash 'l arg-type
+                             'r (λ (r-node) arg-type)))]]
+ [LteComparison [bool (lambda (n t)
+                        (hash 'l int
+                              'r int))]]
+ [LtComparison [bool (lambda (n t)
+                       (hash 'l int
+                             'r int))]]
+ [GtComparison [bool (lambda (n t)
+                       (hash 'l int
+                             'r int))]]
+ [GteComparison [bool (lambda (n t)
+                        (hash 'l int
+                              'r int))]]
+ [OpAnd [bool (lambda (n t)
+                (hash 'l bool
+                      'r bool))]]
+ [OpOr [bool (lambda (n t)
+               (hash 'l bool
+                     'r bool))]]
+ [OpNot [bool (lambda (n t)
+                (hash 'e bool))]]
+ [IfStmt [(fresh-type-variable) (lambda (n t)
+                                  (hash 'cond bool
+                                        'then t
+                                        'else t))]]
+ [LiteralBool [bool (lambda (n t) (hash))]]
+
+ [Program [int (lambda (n t) (hash 'LetStar int))]]
+
  [Subtraction [int (λ (n t) (hash 'es t))]])
 
 (add-property
@@ -64,6 +112,8 @@
  ;;       ,@(map (λ (c) ($xsmith_render-node c))
  ;;              (ast-children (ast-child 'sideEs n)))
  ;;       ,($xsmith_render-node (ast-child 'Expression n))))]
+ [Program (lambda (n)
+            ($xsmith_render-node (ast-child 'LetStar n)))]
  [LetStar (lambda (n)
             (foldr (lambda (d res)
                      `(let ([,(string->symbol (ast-child 'name d))
@@ -81,15 +131,34 @@
                              (ast-children (ast-child 'es n)))))]
  [Subtraction (λ (n) `(- ,@(map (λ (c) ($xsmith_render-node c))
                                 (ast-children (ast-child 'es n)))))]
- [PrimRead (lambda (n) `(read))])
+ [PrimRead (lambda (n) `(read))]
+ [LiteralBool (lambda (n) (ast-child 'v n))]
+ [EqComparison (lambda (n) `(eq? ,($xsmith_render-node (ast-child 'l n))
+                                 ,($xsmith_render-node (ast-child 'r n))))]
+ [LteComparison (lambda (n) `(<= ,($xsmith_render-node (ast-child 'l n))
+                                 ,($xsmith_render-node (ast-child 'r n))))]
+ [LtComparison (lambda (n) `(< ,($xsmith_render-node (ast-child 'l n))
+                               ,($xsmith_render-node (ast-child 'r n))))]
+ [GteComparison (lambda (n) `(>= ,($xsmith_render-node (ast-child 'l n))
+                                 ,($xsmith_render-node (ast-child 'r n))))]
+ [GtComparison (lambda (n) `(> ,($xsmith_render-node (ast-child 'l n))
+                               ,($xsmith_render-node (ast-child 'r n))))]
+ [OpAnd (lambda (n) `(and ,($xsmith_render-node (ast-child 'l n))
+                          ,($xsmith_render-node (ast-child 'r n))))]
+ [OpOr (lambda (n) `(or ,($xsmith_render-node (ast-child 'l n))
+                        ,($xsmith_render-node (ast-child 'r n))))]
+ [OpNot (lambda (n) `(not ,($xsmith_render-node (ast-child 'e n))))]
+ [IfStmt (lambda (n) `(if ,($xsmith_render-node (ast-child 'cond n))
+                          ,($xsmith_render-node (ast-child 'then n))
+                          ,($xsmith_render-node (ast-child 'else n))))])
 
 
 
 ;; This line defines `arith-command-line`.
 (define-xsmith-interface-functions
   [arith]
-  #:program-node LetStar
-  #:type-thunks (list (λ () int))
+  #:program-node Program
+  #:type-thunks (list (λ () int) (lambda () bool))
   #:comment-wrap (λ (lines)
                    (string-join
                     (map (λ (x) (format ";; ~a" x)) lines)

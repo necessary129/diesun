@@ -15809,17 +15809,8 @@ fuzz() {
 	pid=$1
 	testname="tests/var${pid}_test_zfuzz"
 	while true; do
-		echo '#lang racket' >"${testname}.rkt"
-		racket fuzz-smith.rkt --max-depth 25 --type-max-depth 25 >>"${testname}.rkt"
-		reads=$(grep -o '(read)' "${testname}.rkt" | wc -l)
-		touch "${testname}.in"
-		for _ in $(seq 1 "$reads"); do
-			echo $RANDOM >>"${testname}.in"
-		done
-		res="$(racket ${testname}.rkt <${testname}.in)"
-		echo "$(( ((res % 256) + 256) % 256 ))" >"${testname}.res"
-		tail -n +2 "${testname}.rkt" >"${testname}1.rkt"
-		rm "${testname}.rkt" && mv "${testname}1.rkt" "${testname}.rkt"
+		racket fuzz-smith.rkt --max-depth 25 --type-max-depth 25 >"${testname}.rkt"
+		bash fuzz-genio.sh "$testname"
 		racket fuzz-test.rkt "var${pid}" 2>&1 | tee "fuzz.${pid}.out" | grep 'FAILURE' && break
 		test "${PIPESTATUS[0]}" -eq 0 || break
 		rm "${testname}.in"
