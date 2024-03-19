@@ -304,6 +304,8 @@
 
 (define (uncover_write instr)
   (match instr
+    [(Instr 'cmpq _) (set)]
+    [(Instr 'set (list _ (ByteReg b))) (set (byte-reg->full-reg b))]
     [(Instr _ (list _ (Var v))) (set v)]
     [(Instr _ (list _ (Reg v))) (set v)]
     [(Instr _ (list (Var v))) (set v)]
@@ -379,13 +381,17 @@
          (for*/list ([v lafter] [d (set->list Wset)] #:unless (equal? d v))
            `(,v ,d)))]))
 
-(define (build_interblock code lafterlist)
-  (undirected-graph (append-map get_edge_instr code lafterlist)))
+(define (loc-hack lafterlist)
+  (for/list ([v (set->list (apply set-union lafterlist))])
+    `(,v ,v)))
+
+(define (build_interblock code lbefore lafterlist)
+  (undirected-graph (append (loc-hack (cons lbefore lafterlist)) (append-map get_edge_instr code lafterlist))))
 
 (define (build_interference_block block)
   (match block
     [(Block info code) (Block
-                        (dict-set info 'conflicts (build_interblock code (dict-ref info 'lafter))) code)]))
+                        (dict-set info 'conflicts (build_interblock code (dict-ref info 'lbefore) (dict-ref info 'lafter))) code)]))
 
 (define (build_interference p)
   (match p
@@ -451,7 +457,7 @@
          [locs (for/list ([var ltypes])
                  (cons var (color->loc (dict-ref colors var) (set-count used-callee))))]
          )
-    ;; (printf "nreg: ~a nloc: ~a nstack: ~a used-callee: ~a locs: ~a~n" nreg nloc nstack used-callee locs)
+    (printf "nreg: ~a nloc: ~a nstack: ~a used-callee: ~a locs: ~a~n" nreg nloc nstack used-callee locs)
     (values nstack used-callee locs)))
 ;; assign-homes : x86var -> x86var
 ;; (define (assign-homes p)
@@ -625,10 +631,10 @@
     ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
     ("select instructions" , select-instructions ,interp-pseudo-x86-1)
     ("uncover live" ,uncover_live ,interp-pseudo-x86-1)
-    ("build_interference" ,build_interference ,interp-pseudo-x86-1)
+    ;; ("build_interference" ,build_interference ,interp-pseudo-x86-1)
     ; ("allocate_registers" ,assign-homes ,interp-pseudo-x86-1)
     ; ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
-    ; ("build interference" ,build_interference ,interp-pseudo-x86-0)
+    ("build interference" ,build_interference ,interp-pseudo-x86-1)
     ("build mov graph" ,build_mov_graph ,interp-pseudo-x86-1)
     ("reg-color" ,reg-color ,interp-pseudo-x86-1)
     ("assign homes" ,assign-homes ,interp-x86-1)
