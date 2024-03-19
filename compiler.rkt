@@ -16,6 +16,7 @@
 (require "type-check-Cif.rkt")
 (require "utilities.rkt")
 (require "priority_queue.rkt")
+(require "multigraph.rkt")
 (provide (all-defined-out))
 (define reserved-registers (set 'rax 'r11 'r15 'rsp 'rbp))
 (define (uniquify-exp env)
@@ -278,7 +279,7 @@
 ))
 
 (define arg-regs '(rdi rsi rdx rcx r8 r9))
-(define second-read-instr (set 'addq 'subq))
+(define second-read-instr (set 'addq 'subq 'cmpq))
 
 (define (second-read? op) (set-member? second-read-instr op))
 
@@ -290,13 +291,14 @@
     [(Instr (? second-read? op) (list _ (Reg v))) (set v)]
     [_ (set)]))
 
-(define (uncover_read instr)
+(define (uncover_read instr lbl->live)
   (let ([sset (uncover_read_secondread instr)])
     (match instr
       [(Instr _ (cons (Var v) _)) (set-add sset v)]
       [(Instr _ (cons (Reg v) _)) (set-add sset v)]
       [(Callq _ arity) (list->set (take arg-regs arity))]
-      [(Jmp 'conclusion) (set 'rax 'rsp)]
+      [(Jmp label) (dict-ref lbl->live label)]
+      [(JmpIf _ label) (dict-ref lbl->live label)]
       [_ (set)])))
 
 (define (uncover_write instr)
@@ -308,22 +310,44 @@
     [(Callq _ _) caller-save]
     [_ (set)]))
 
-(define (get_live code ini)
+(define (get_live code ini lbl->live)
   (foldr (lambda (instr lset)
            (cons
-            (set-union (set-subtract (car lset) (uncover_write instr)) (uncover_read instr))
+            (set-union (set-subtract (car lset) (uncover_write instr)) (uncover_read instr lbl->live))
             lset))
          (list ini) code))
 
-(define (uncover_block b)
+(define (uncover_block b lbl->live [ini (set)])
   (match b
-    [(Block info code) (Block (dict-set info 'lafter (cdr (get_live code (set)))) code)]))
+    [(Block info code) (let ([livesets (get_live code ini lbl->live)])
+                         (Block (dict-set* info 'lbefore (car livesets) 'lafter (cdr livesets))))]))
 
 (define (uncover_live p)
   (match p
     [(X86Program info blocks)
-     (X86Program info
-                 (for/list ([block blocks]) `(,(car block) . ,(uncover_block (cdr block)))))]))
+     (let* ([cfg (build_cfg blocks)]
+            [vert-list (tsort (transpose cfg))]
+            [label->live `((conclusion . ,(set 'rax 'rsp)))]
+            [newblocks '()])
+       (for ([v vert-list])
+         (let ([newblock (uncover_block (dict-ref blocks v) label->live)])
+           (dict-set! label->live v (dict-ref (Block-info newblock) 'lbefore))
+           (dict-set! newblocks v newblock)))
+       (X86Program (dict-set info 'label->live label->live) newblocks))]))
+
+(define (build_cfg blocks)
+  (let* ([get_succ (lambda (code)
+                     (foldl (lambda (instr succset)
+                              (match instr
+                                [(Jmp label) (set-add succset label)]
+                                [(JmpIf _ label) (set-add succset label)]
+                                [_ succset]))
+                            (set) code))]
+         [get_edge_list (lambda (blockpair)
+                          (let ([label (car blockpair)] [block (cdr blockpair)])
+                            (for/list ([v (set->list (get_succ (Block-instr* block)))])
+                              (cons label v))))])
+    (make-multigraph (append-map get_edge_list blocks))))
 
 (define (get-val loc)
   (match loc
