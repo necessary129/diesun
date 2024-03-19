@@ -236,8 +236,11 @@
     [(Prim op (list e1 e2))
      (list (Instr 'movq (list (select-inst-atom e1) v))
            (Instr (get-op-name e) (list (select-inst-atom e2) v)))]
+    [(Prim 'not (list e1))
+     (list (Instr 'movq (list (select-inst-atom e1) v))
+           (Instr 'xorq (list (Imm 1) v)))]
     [(Prim op (list e1))
-     (list (Instr 'movq (list (select-inst-atom e1) v)) 
+     (list (Instr 'movq (list (select-inst-atom e1) v))
            (Instr (get-op-name e) (list v)))]))
 
 (define (select-inst-stmt s)
