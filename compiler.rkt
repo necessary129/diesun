@@ -257,7 +257,7 @@
   (match tail
     [(Return e) (append (select-inst-assgn (Reg 'rax) e) (list (Jmp 'conclusion)))]
     [(Seq s t) (append (select-inst-stmt s) (select-inst-tail t))]
-    [(Goto l) (Jmp l)]
+    [(Goto l) (list (Jmp l))]
     [(IfStmt (Prim cmp (list arg1 arg2)) (Goto l1) (Goto l2)) 
      (list 
      (Instr 'cmpq (list (select-inst-atom arg2) (select-inst-atom arg1)))
