@@ -87,29 +87,29 @@
     [(Program info e) (Program info (rco_exp e))]))
 
 (define (explicate_tail e)
-  (delay
+  (lazy
     (match e
       [(Var x) (Return (Var x))]
       [(Int n) (Return (Int n))]
-      [(Let x rhs body) (force (explicate_assign rhs x (explicate_tail body)))]
+      [(Let x rhs body) (explicate_assign rhs x (explicate_tail body))]
       [(Prim op es) (Return (Prim op es))]
       [(Bool b) (Return (Bool b))]
-      [(If cnd thn els) (force (explicate_pred cnd (explicate_tail thn) (explicate_tail els)))]
+      [(If cnd thn els) (explicate_pred cnd (explicate_tail thn) (explicate_tail els))]
       [_ (error "explicate_tail unhandled case" e)])))
 
 (define (explicate_assign e x cont)
-  (delay
+  (lazy
     (match e
       [(Var y) (Seq (Assign (Var x) (Var y)) (force cont))]
       [(Int n) (Seq (Assign (Var x) (Int n)) (force cont))]
-      [(Let y rhs body) (force (explicate_assign rhs y (explicate_assign body x cont)))]
+      [(Let y rhs body) (explicate_assign rhs y (explicate_assign body x cont))]
       [(Prim op es) (Seq (Assign (Var x) (Prim op es)) (force cont))]
       [(Bool b) (Seq (Assign (Var x) (Bool b)) (force cont))]
-      [(If cnd thn els) (force (explicate_pred cnd (explicate_assign thn x cont) (explicate_assign els x cont)))]
+      [(If cnd thn els) (explicate_pred cnd (explicate_assign thn x cont) (explicate_assign els x cont))]
       [_ (error "explicate_assign unhandled case" e)])))
 
 (define (create_block tail)
-  (delay
+  (lazy
     (define t (force tail))
     (match t
       [(Goto label) (Goto label)]
@@ -119,17 +119,17 @@
          (Goto label))])))
 
 (define (explicate_pred cnd thn els)
-  (delay
+  (lazy
     (let ([thnblock (create_block thn)] [elsblock (create_block els)])
       (match cnd
         [(Var x) (IfStmt (Prim 'eq? (list (Var x) (Bool #t))) (force thnblock) (force elsblock))]
-        [(Let x rhs body) (force (explicate_assign rhs x (explicate_pred body thn els)))]
-        [(Prim 'not (list e)) (force (explicate_pred e els thn))]
+        [(Let x rhs body) (explicate_assign rhs x (explicate_pred body thn els))]
+        [(Prim 'not (list e)) (explicate_pred e els thn)]
         [(Prim (? (or/c 'eq? '< '> '<= '>=) op) es) (IfStmt (Prim op es) (force thnblock) (force elsblock))]
-        [(Bool b) (if b (force thn) (force els))]
-        [(If ncnd nthn nels) (force (explicate_pred ncnd
-                                                    (explicate_pred nthn thnblock elsblock)
-                                                    (explicate_pred nels thnblock elsblock)))]
+        [(Bool b) (if b thn els)]
+        [(If ncnd nthn nels) (explicate_pred ncnd
+                                             (explicate_pred nthn thnblock elsblock)
+                                             (explicate_pred nels thnblock elsblock))]
         [else (error "explicate_pred unhandled case " cnd)]))))
 
 (define (explicate-control p)
@@ -578,7 +578,7 @@
     (Block '()
            `(,(Instr 'pushq (list (Reg 'rbp)))
              ,(Instr 'movq (list (Reg 'rsp) (Reg 'rbp)))
-             ,(Instr 'subq (list (Imm fsize) (Reg 'rsp)))
+             ,@(if (not (eq? fsize 0)) (list (Instr 'subq (list (Imm fsize) (Reg 'rsp)))) '())
              ,@(map (lambda (v) (Instr 'pushq (list (Reg v)))) used-callee)
              ,(Jmp 'start)))))
 
@@ -589,7 +589,7 @@
          [fsize (- (align (* 8 (+ S C)) 16) (* 8 C))])
     (Block '()
            `(,@(map (lambda (v) (Instr 'popq (list (Reg v)))) (reverse used-callee))
-             ,(Instr 'addq (list (Imm fsize) (Reg 'rsp)))
+             ,@(if (not (eq? fsize 0)) (list (Instr 'addq (list (Imm fsize) (Reg 'rsp)))) '())
              ,(Instr 'popq (list (Reg 'rbp)))
              ,(Retq)))))
 ;; prelude-and-conclusion : x86int -> x86int
