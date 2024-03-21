@@ -31,8 +31,9 @@
 (define test-family (string-append test-class "_test"))
 
 ;; The following tests the intermediate-language outputs of the passes.
-(interp-tests "cond" type-check-Lif compiler-passes interp-Lif test-family (tests-for test-class))
+(interp-tests "cond" type-check-Lif
+              compiler-passes interp-Lif test-family (tests-for test-class))
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.
-;; (compiler-tests "var" #f compiler-passes test-family (tests-for test-class))
+(compiler-tests "var" type-check-Lif compiler-passes test-family (tests-for test-class))
