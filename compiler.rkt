@@ -3,6 +3,7 @@
          racket/stream)
 (require racket/fixnum)
 (require racket/set)
+(require racket/promise)
 (require graph)
 (require "interp-Lint.rkt")
 (require "interp-Lvar.rkt")
@@ -86,50 +87,55 @@
     [(Program info e) (Program info (rco_exp e))]))
 
 (define (explicate_tail e)
-  (match e
-    [(Var x) (Return (Var x))]
-    [(Int n) (Return (Int n))]
-    [(Let x rhs body) (explicate_assign rhs x (explicate_tail body))]
-    [(Prim op es) (Return (Prim op es))]
-    [(Bool b) (Return (Bool b))]
-    [(If cnd thn els) (explicate_pred cnd (explicate_tail thn) (explicate_tail els))]
-    [_ (error "explicate_tail unhandled case" e)]))
+  (delay
+    (match e
+      [(Var x) (Return (Var x))]
+      [(Int n) (Return (Int n))]
+      [(Let x rhs body) (force (explicate_assign rhs x (explicate_tail body)))]
+      [(Prim op es) (Return (Prim op es))]
+      [(Bool b) (Return (Bool b))]
+      [(If cnd thn els) (force (explicate_pred cnd (explicate_tail thn) (explicate_tail els)))]
+      [_ (error "explicate_tail unhandled case" e)])))
 
 (define (explicate_assign e x cont)
-  (match e
-    [(Var y) (Seq (Assign (Var x) (Var y)) cont)]
-    [(Int n) (Seq (Assign (Var x) (Int n)) cont)]
-    [(Let y rhs body) (explicate_assign rhs y (explicate_assign body x cont))]
-    [(Prim op es) (Seq (Assign (Var x) (Prim op es)) cont)]
-    [(Bool b) (Seq (Assign (Var x) (Bool b)) cont)]
-    [(If cnd thn els) (explicate_pred cnd (explicate_assign thn x cont) (explicate_assign els x cont))]
-    [_ (error "explicate_assign unhandled case" e)]))
+  (delay
+    (match e
+      [(Var y) (Seq (Assign (Var x) (Var y)) (force cont))]
+      [(Int n) (Seq (Assign (Var x) (Int n)) (force cont))]
+      [(Let y rhs body) (force (explicate_assign rhs y (explicate_assign body x cont)))]
+      [(Prim op es) (Seq (Assign (Var x) (Prim op es)) (force cont))]
+      [(Bool b) (Seq (Assign (Var x) (Bool b)) (force cont))]
+      [(If cnd thn els) (force (explicate_pred cnd (explicate_assign thn x cont) (explicate_assign els x cont)))]
+      [_ (error "explicate_assign unhandled case" e)])))
 
 (define (create_block tail)
-  (match tail
-    [(Goto _) tail]
-    [else
-     (let ([label (gensym 'block)])
-       (get-basic-blocks (cons (cons label tail) (get-basic-blocks)))
-       (Goto label))]))
+  (delay
+    (define t (force tail))
+    (match t
+      [(Goto label) (Goto label)]
+      [else
+       (let ([label (gensym 'block)])
+         (get-basic-blocks (cons (cons label t) (get-basic-blocks)))
+         (Goto label))])))
 
 (define (explicate_pred cnd thn els)
-  (match cnd
-    [(Var x) (IfStmt (Prim 'eq? (list (Var x) (Bool #t))) (create_block thn) (create_block els))]
-    [(Let x rhs body) (explicate_assign rhs x (explicate_pred body thn els))]
-    [(Prim 'not (list e)) (explicate_pred e els thn)]
-    [(Prim (? (or/c 'eq? '< '> '<= '>=) op) es) (IfStmt (Prim op es) (create_block thn) (create_block els))]
-    [(Bool b) (if b thn els)]
-    [(If ncnd nthn nels) (let ([thnblock (create_block thn)] [elsblock (create_block els)])
-                           (explicate_pred ncnd
-                                           (explicate_pred nthn thnblock elsblock)
-                                           (explicate_pred nels thnblock elsblock)))]
-    [else (error "explicate_pred unhandled case " cnd)]))
+  (delay
+    (let ([thnblock (create_block thn)] [elsblock (create_block els)])
+      (match cnd
+        [(Var x) (IfStmt (Prim 'eq? (list (Var x) (Bool #t))) (force thnblock) (force elsblock))]
+        [(Let x rhs body) (force (explicate_assign rhs x (explicate_pred body thn els)))]
+        [(Prim 'not (list e)) (force (explicate_pred e els thn))]
+        [(Prim (? (or/c 'eq? '< '> '<= '>=) op) es) (IfStmt (Prim op es) (force thnblock) (force elsblock))]
+        [(Bool b) (if b (force thn) (force els))]
+        [(If ncnd nthn nels) (force (explicate_pred ncnd
+                                                    (explicate_pred nthn thnblock elsblock)
+                                                    (explicate_pred nels thnblock elsblock)))]
+        [else (error "explicate_pred unhandled case " cnd)]))))
 
 (define (explicate-control p)
   (parameterize ([get-basic-blocks '()])
     (match p
-      [(Program info body) (let ([startblock (explicate_tail body)])
+      [(Program info body) (let ([startblock (force (explicate_tail body))])
                              (get-basic-blocks (cons `(start . ,startblock) (get-basic-blocks)))
                              (CProgram info (get-basic-blocks)))])))
 
@@ -175,6 +181,34 @@
       ;; [(Prim (? (or/c '+ '-) op) (list (Int n1) e)) (Prim op (list (Int ((if (eq? op '+) fx- fx+) 0 n1)) (Prim (if (eq? op '+) '+ '-) (list (pe_exp e)))))]
       [_ (Prim '- (list r1))])))
 
+(define (pe_pred env)
+  (lambda (cnd thn els)
+    (match cnd
+      [(Bool #t) thn]
+      [(Bool #f) els]
+      [_ (If cnd thn els)])))
+
+(define (pe_cmp->f cmp)
+  (match cmp
+    ['eq? eq?]
+    ['> >]
+    ['>= >=]
+    ['< <]
+    ['<= <=]))
+
+(define (pe_cmp env)
+  (lambda (cmp e1 e2)
+    (match* (cmp e1 e2)
+      [('eq? (Bool b1) (Bool b2)) (Bool (eq? b1 b2))]
+      [(_ (Int n1) (Int n2)) (Bool ((pe_cmp->f cmp) n1 n2))]
+      [(_ _ _) (Prim cmp (list e1 e2))])))
+
+(define (pe_not env)
+  (lambda (e)
+    (match e
+      [(Bool b) (Bool (not b))]
+      [_ (Prim 'not (list e))])))
+
 (define (pe_exp env)
   (lambda (e)
     (match e
@@ -182,9 +216,13 @@
       [(Prim '+ (list e1 e2)) ((pe_add env) ((pe_exp env) e1) ((pe_exp env) e2))]
       [(Prim '- (list e1 e2)) ((pe_sub env) ((pe_exp env) e1) ((pe_exp env) e2))]
       [(Prim '- (list e1)) ((pe_neg env) ((pe_exp env) e1))]
+      [(Prim 'not (list e)) ((pe_not env) ((pe_exp env) e))]
+      [(Prim (? (or/c 'eq? '< '> '<= '>=) cmp) (list e1 e2))
+       ((pe_cmp env) cmp ((pe_exp env) e1) ((pe_exp env) e2))]
       [(Let x e body)
        (let ([rhs ((pe_exp env) e)])
          (if (atm? rhs) ((pe_exp (dict-set env x rhs)) body) (Let x rhs ((pe_exp env) body))))]
+      [(If cnd thn els) ((pe_pred env) ((pe_exp env) cnd) ((pe_exp env) thn) ((pe_exp env) els))]
       [_ e])))
 
 (define (partial-eval p)
@@ -648,7 +686,7 @@
   ;; Uncomment the following passes as you finish them.
   `(
     ("Shrink" ,shrink ,interp-Lif ,type-check-Lif)
-    ; ("Partial eval" ,partial-eval ,interp-Lvar ,type-check-Lvar)
+    ("Partial eval" ,partial-eval ,interp-Lif ,type-check-Lif)
     ("uniquify" ,uniquify ,interp-Lif ,type-check-Lif)
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
     ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
