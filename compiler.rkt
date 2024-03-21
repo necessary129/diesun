@@ -298,9 +298,9 @@
       [(Instr _ (cons (Var v) _)) (set-add sset v)]
       [(Instr _ (cons (Reg v) _)) (set-add sset v)]
       [(Callq _ arity) (list->set (take arg-regs arity))]
-      [(Jmp label) (dict-ref lbl->live label)]
-      [(JmpIf _ label) (dict-ref lbl->live label)]
-      [_ (set)])))
+      [(Jmp label) (dict-ref lbl->live label (set))]
+      [(JmpIf _ label) (dict-ref lbl->live label (set))]
+      [_ sset])))
 
 (define (uncover_write instr)
   (match instr
@@ -361,7 +361,7 @@
                           (let ([label (car blockpair)] [block (cdr blockpair)])
                             (for/list ([v (set->list (get_succ (Block-instr* block)))])
                               (list label v))))])
-    (printf "gra: ~a~n" (append-map get_edge_list blocks))
+    ;; (printf "gra: ~a~n" (append-map get_edge_list blocks))
     (make-multigraph (append-map get_edge_list blocks))))
 
 (define (get-val loc)
@@ -381,21 +381,30 @@
          (for*/list ([v lafter] [d (set->list Wset)] #:unless (equal? d v))
            `(,v ,d)))]))
 
-(define (loc-hack lafterlist)
-  (for/list ([v (set->list (apply set-union lafterlist))])
+(define (loc-hack code)
+  (for/list ([v (set->list (foldr (lambda (ins varset)
+									(define s (set-union (uncover_read ins '()) (uncover_write ins) varset))
+									;; (printf "ins ~a ~a ~n" ins s)
+                                    s) (set) code))])
     `(,v ,v)))
 
 (define (build_interblock code lbefore lafterlist)
-  (undirected-graph (append (loc-hack (cons lbefore lafterlist)) (append-map get_edge_instr code lafterlist))))
+  ;; (define s (append (loc-hack code) (append-map get_edge_instr code lafterlist)))
+  ;; (printf "AAA ~a ~a~n" s code)
+  ;; (undirected-graph s)
+  (append-map get_edge_instr code lafterlist))
 
 (define (build_interference_block block)
   (match block
     [(Block info code) (Block
-                        (dict-set info 'conflicts (build_interblock code (dict-ref info 'lbefore) (dict-ref info 'lafter))) code)]))
+                        (dict-set info 'conflict-edges (build_interblock code (dict-ref info 'lbefore) (dict-ref info 'lafter))) code)]))
 
 (define (build_interference p)
   (match p
-    [(X86Program info blocks) (X86Program info (for/list ([block blocks]) `(,(car block) . ,(build_interference_block (cdr block)))))]))
+    [(X86Program info blocks) (let ([newblocks (for/list ([block blocks]) `(,(car block) . ,(build_interference_block (cdr block))))])
+                                (X86Program (dict-set info 'conflicts (undirected-graph (append-map (lambda (b)
+                                                                                                      (dict-ref (Block-info (cdr b)) 'conflict-edges)) newblocks)))
+                                            newblocks))]))
 
 (define (get_mov_related instr)
   (match instr
@@ -404,17 +413,22 @@
 
 (define (build_mov_graph_block block)
   (match block
-    [(Block info code) (Block (dict-set info 'mov-graph (undirected-graph (append-map get_mov_related code))) code)]))
+    [(Block info code) (Block (dict-set info 'mov-rel (append-map get_mov_related code)) code)]))
 
 (define (build_mov_graph p)
   (match p
-    [(X86Program info blocks) (X86Program info (for/list ([block blocks]) `(,(car block) . ,(build_mov_graph_block (cdr block)))))]))
+    [(X86Program info blocks) (let ([newblocks (for/list ([block blocks]) `(,(car block) . ,(build_mov_graph_block (cdr block))))])
+                                (X86Program (dict-set info 'mov-graph (undirected-graph (append-map (lambda (b)
+                                                                                                      (dict-ref (Block-info (cdr b)) 'mov-rel)) newblocks)))
+                                            newblocks))]))
 
 
 (define (assign-home-atm e locs)
+  ;; (printf "a-atm: e: ~a~n" e)
   (match e
     [(Reg _) e]
     [(Imm _) e]
+    [(ByteReg _) e]
     [(Var v) (dict-ref locs v)]))
 
 (define (assign-homes-aexps es locs)
@@ -422,14 +436,15 @@
 
 (define (assign-homes-instr e locs)
   (match e
+    [(Instr 'set (cons cc args)) (Instr 'set (cons cc (assign-homes-aexps args locs)))]
     [(Instr op es) (Instr op (assign-homes-aexps es locs))]
     [_ e]))
 
-(define (assign-homes-block block)
+(define (assign-homes-block block locs)
   (match block
     [(Block info es)
-     (define-values (stackspace used-callee locs) (get-locs info))
-     (Block (dict-set* info 'stack-space stackspace 'used-callee used-callee)
+     ;; (define-values (stackspace used-callee locs) (get-locs info))
+     (Block info ;; (dict-set* info 'stack-space stackspace 'used-callee used-callee)
       (for/list ([e es])
         (assign-homes-instr e locs)))]))
 
@@ -457,7 +472,7 @@
          [locs (for/list ([var ltypes])
                  (cons var (color->loc (dict-ref colors var) (set-count used-callee))))]
          )
-    (printf "nreg: ~a nloc: ~a nstack: ~a used-callee: ~a locs: ~a~n" nreg nloc nstack used-callee locs)
+    ;; (printf "nreg: ~a nloc: ~a nstack: ~a used-callee: ~a locs: ~a~n" nreg nloc nstack used-callee locs)
     (values nstack used-callee locs)))
 ;; assign-homes : x86var -> x86var
 ;; (define (assign-homes p)
@@ -468,29 +483,34 @@
 ;;                    (for/list ([block body])
 ;;                      (cons (car block) (assign-homes-block (cdr block) locs)))))]))
 
+;; (define (assign-homes p)
+;;   (match p
+;;     [(X86Program info body)
+;;      (let* ([newblocks (for/list ([block body])
+;;                          (cons (car block) (assign-homes-block (cdr block))))]
+;;             [stackspace (foldr (lambda (block stack)
+;;                                  (+ (dict-ref (Block-info (cdr block)) 'stack-space) stack)) 0 newblocks)]
+;;             [used-callee (foldr (lambda (block callees)
+;;                                   (set-union callees (dict-ref (Block-info (cdr block)) 'used-callee))) (set) newblocks)])
+;;        (X86Program (dict-set* info 'stack-space stackspace 'used-callee (set->list used-callee)) newblocks))]))
+
 (define (assign-homes p)
   (match p
-    [(X86Program info body)
-     (let* ([newblocks (for/list ([block body])
-                         (cons (car block) (assign-homes-block (cdr block))))]
-            [stackspace (foldr (lambda (block stack)
-                                 (+ (dict-ref (Block-info (cdr block)) 'stack-space) stack)) 0 newblocks)]
-            [used-callee (foldr (lambda (block callees)
-                                  (set-union callees (dict-ref (Block-info (cdr block)) 'used-callee))) (set) newblocks)])
-       (X86Program (dict-set* info 'stack-space stackspace 'used-callee (set->list used-callee)) newblocks))]))
+    [(X86Program info blocks) (let-values ([(nstack used-calle locs) (get-locs info)])
+                                (X86Program (dict-set* info 'stack-space nstack 'used-callee (set->list used-calle)) (for/list ([b blocks]) (cons (car b) (assign-homes-block (cdr b) locs)))))]))
 
 (define (patch-instr e)
   (match e
     [(Instr 'movq (list v v)) '()]
     [(Instr 'cmpq (list e1 (Imm e2)))
-           (list (Instr 'movq (list (Imm e2) (Reg 'rax)))
-                  (Instr 'cmpq (list e1 (Reg 'rax))))]
+     (list (Instr 'movq (list (Imm e2) (Reg 'rax)))
+           (Instr 'cmpq (list e1 (Reg 'rax))))]
     [(Instr 'cmpq (list (Deref r1 o1) (Deref r2 o2)))
-           (list (Instr 'movq (list (Deref r2 o2) (Reg 'rax)))
-                 (Instr 'cmpq (list (Deref r1 o1) (Reg 'rax))))]
-    [(Instr 'movbzq (list e1 (Deref r2 o2)))
-           (list (Instr 'movbzq (list e1 (Reg 'rax)))
-                 (Instr 'movq (list (Reg 'rax) (Deref r2 o2))))]
+     (list (Instr 'movq (list (Deref r2 o2) (Reg 'rax)))
+           (Instr 'cmpq (list (Deref r1 o1) (Reg 'rax))))]
+    [(Instr 'movzbq (list e1 (Deref r2 o2)))
+     (list (Instr 'movzbq (list e1 (Reg 'rax)))
+           (Instr 'movq (list (Reg 'rax) (Deref r2 o2))))]
     [(Instr op (list (Imm n1) r)) #:when (and (> (abs n1) 2147483647) (not (equal? op 'movq)))
                                   (list (Instr 'movq (list (Imm n1) (Reg 'r11))) (Instr op (list (Reg 'r11) r)))]
     [(Instr op (list (Deref r1 o1) (Deref r2 o2)))
@@ -600,7 +620,7 @@
           ;;     (printf "NOT EQ ~a ~a ~a~n" most color (get-color satur))
           ;;     (void))
           ;;
-          ;; (printf "most ~a: ~a: color: ~a~n" most satur color)
+           ;; (printf "most ~a: ~a: color: ~a~n" most satur color)
           ;; (printf "maxloc: ~a color: ~a availregset: ~a~n" maxloc color availregset)
           (unless (dict-has-key? colors most)
             (set-color! most color)
@@ -612,11 +632,14 @@
   (match b
     [(Block info code) (Block (dict-set info 'colors (dsatur (dict-ref info 'conflicts) (dict-ref info 'mov-graph))) code)]))
 
+;; (define (reg-color p)
+;;   (match p
+;;     [(X86Program info blocks) (X86Program info (for/list ([block blocks]) (cons
+;;                                                                            (car block)
+;;                                                                            (reg-color-block (cdr block)))))]))
 (define (reg-color p)
   (match p
-    [(X86Program info blocks) (X86Program info (for/list ([block blocks]) (cons
-                                                                           (car block)
-                                                                           (reg-color-block (cdr block)))))]))
+    [(X86Program info blocks) (X86Program (dict-set info 'colors (dsatur (dict-ref info 'conflicts) (dict-ref info 'mov-graph))) blocks)]))
 
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
@@ -639,5 +662,6 @@
     ("reg-color" ,reg-color ,interp-pseudo-x86-1)
     ("assign homes" ,assign-homes ,interp-x86-1)
     ("patch instructions" ,patch-instructions ,interp-x86-1)
+    ("patch instructions 2" ,patch-instructions ,interp-x86-1)
     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-1)
     ))
