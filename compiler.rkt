@@ -57,6 +57,8 @@
 (define (rco_atom e)
   (match e
     [(Var _) (values e '())]
+    [(Int i) #:when(> (abs i) 2147483647) (let ([tmpvar (gensym 'tmp)])
+                                            (values (Var tmpvar) `((,tmpvar . ,(Int i)))))]
     [(Int _) (values e '())]
     [(Bool _) (values e '())]
     [(If c t e) (let ([tmpvar (gensym 'tmp)])
@@ -549,8 +551,9 @@
     [(Instr 'movzbq (list e1 (Deref r2 o2)))
      (list (Instr 'movzbq (list e1 (Reg 'rax)))
            (Instr 'movq (list (Reg 'rax) (Deref r2 o2))))]
-    [(Instr op (list (Imm n1) r)) #:when (and (> (abs n1) 2147483647) (not (equal? op 'movq)))
-                                  (list (Instr 'movq (list (Imm n1) (Reg 'r11))) (Instr op (list (Reg 'r11) r)))]
+    ;; [(Instr op (list (Imm n1) r)) #:when (and (> (abs n1) 2147483647) (not (equal? op 'movq)))
+    ;;                               (assert (format "gt32 op: ~a" e) #f)
+    ;;                               (list (Instr 'movq (list (Imm n1) (Reg 'r11))) (Instr op (list (Reg 'r11) r)))]
     [(Instr op (list (Deref r1 o1) (Deref r2 o2)))
      (list (Instr 'movq (list (Deref r1 o1) (Reg 'rax))) (Instr op (list (Reg 'rax) (Deref r2 o2))))]
     [(Instr op (list (Imm n1) (Deref r1 o1))) #:when (> (abs n1) 2147483647)
