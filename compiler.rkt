@@ -14,6 +14,8 @@
 (require "type-check-Lvar.rkt")
 (require "type-check-Cvar.rkt")
 (require "type-check-Lif.rkt")
+(require "interp-Lwhile.rkt")
+(require "type-check-Lwhile.rkt")
 (require "type-check-Cif.rkt")
 (require "utilities.rkt")
 (require "priority_queue.rkt")
@@ -29,6 +31,9 @@
       [(Int n) (Int n)]
       [(Bool _) e]
       [(If c t e) (If (recur c) (recur t) (recur e))]
+      [(SetBang var exp) (SetBang (dict-ref env var) (recur exp))]
+      [(Begin exp* exp) (Begin (for/list ([ex exp*]) (recur ex)) (recur exp))]
+      [(WhileLoop con body) (WhileLoop (recur con) (recur body))]
       [(Let x e body)
        (let* ([newvar (gensym x)]
               [newexp (recur e)]
@@ -45,6 +50,39 @@
 (define (uniquify p)
   (match p
     [(Program info e) (Program info ((uniquify-exp '()) e))]))
+
+(define (collect-set! e)
+  (match e
+    [(Var _) (set)]
+    [(Int _) (set)]
+    [(Let _ rhs body) (set-union (collect-set! rhs) (collect-set! body))]
+    [(SetBang var rhs) (set-union (set var) (collect-set! rhs))]
+    [(Bool _) (set)]
+    [(If c t e) (set-union (collect-set! c) (collect-set! t) (collect-set! e))]
+    [(Begin exp* exp) (set-union (foldl (lambda (firEl collEl) (set-union (collect-set! firEl) collEl)) (set) exp*) (collect-set! exp))]
+    [(WhileLoop con body) (set-union (collect-set! con) (collect-set! body))]
+    [(Prim op es) (foldl (lambda (firEl collEl) (set-union (collect-set! firEl) collEl)) (set) es)]
+    [_ (set)]))
+
+(define ((uncover-get!-exp set!-vars) e)
+  (define recur (uncover-get!-exp set!-vars))
+  (match e
+    [(Var x) (if (set-member? set!-vars x)
+                 (GetBang x)
+                 (Var x))]
+    [(Let x rhs body) (Let x (recur rhs) (recur body))]
+    [(Int _) e]
+    [(Bool _) e]
+    [(SetBang var rhs) (SetBang var (recur rhs))]
+    [(If c t e) (If (recur c) (recur t) (recur e))]
+    [(Begin e* e) (Begin (for/list ([e e*]) (recur e)) (recur e))]
+    [(WhileLoop con body) (WhileLoop (recur con) (recur body))]
+    [(Prim op es) (Prim op (for/list ([e es]) (recur e)))]))
+
+(define (uncover-get! p)
+  (match p
+    [(Program info body) (let ([set!-vars (collect-set! body)])
+                           (Program info ((uncover-get!-exp set!-vars) body)))]))
 
 (define (accumulate_aexps es)
   (foldr (lambda (e flist)
@@ -155,8 +193,11 @@
     [(Let y rhs body) (Let y (shrink-exp rhs) (shrink-exp body))]
     [(Prim op es) (Prim op (map shrink-exp es))]
     [(If c t e) (If (shrink-exp c) (shrink-exp t) (shrink-exp e))]
+    [(Begin e* e) (Begin (for/list ([e e*]) (shrink-exp e)) (shrink-exp e))]
+    [(WhileLoop cnd body) (WhileLoop (shrink-exp cnd) (shrink-exp body))]
+    [(SetBang var rhs) (SetBang var (shrink-exp rhs))]
     [_ (error "shrink-exp unhandled case" p)]
-  )
+    )
 )
 
 (define (pe_add env)
@@ -688,21 +729,22 @@
 (define compiler-passes
   ;; Uncomment the following passes as you finish them.
   `(
-    ("Shrink" ,shrink ,interp-Lif ,type-check-Lif)
-    ("Partial eval" ,partial-eval ,interp-Lif ,type-check-Lif)
-    ("uniquify" ,uniquify ,interp-Lif ,type-check-Lif)
-    ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
-    ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
-    ("select instructions" , select-instructions ,interp-pseudo-x86-1)
-    ("uncover live" ,uncover_live ,interp-pseudo-x86-1)
+    ("Shrink" ,shrink ,interp-Lwhile ,type-check-Lwhile)
+    ;; ("Partial eval" ,partial-eval ,interp-Lif ,type-check-Lif)
+    ("uniquify" ,uniquify ,interp-Lwhile ,type-check-Lwhile)
+    ("uncover-get!" ,uncover-get! ,interp-Lwhile ,type-check-Lwhile )
+    ;; ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
+    ;; ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
+    ;; ("select instructions" , select-instructions ,interp-pseudo-x86-1)
+    ;; ("uncover live" ,uncover_live ,interp-pseudo-x86-1)
     ;; ("build_interference" ,build_interference ,interp-pseudo-x86-1)
     ; ("allocate_registers" ,assign-homes ,interp-pseudo-x86-1)
     ; ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
-    ("build interference" ,build_interference ,interp-pseudo-x86-1)
-    ("build mov graph" ,build_mov_graph ,interp-pseudo-x86-1)
-    ("reg-color" ,reg-color ,interp-pseudo-x86-1)
-    ("assign homes" ,assign-homes ,interp-x86-1)
-    ("patch instructions" ,patch-instructions ,interp-x86-1)
-    ("patch instructions 2" ,patch-instructions ,interp-x86-1)
-    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-1)
+    ;; ("build interference" ,build_interference ,interp-pseudo-x86-1)
+    ;; ("build mov graph" ,build_mov_graph ,interp-pseudo-x86-1)
+    ;; ("reg-color" ,reg-color ,interp-pseudo-x86-1)
+    ;; ("assign homes" ,assign-homes ,interp-x86-1)
+    ;; ("patch instructions" ,patch-instructions ,interp-x86-1)
+    ;; ("patch instructions 2" ,patch-instructions ,interp-x86-1)
+    ;; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-1)
     ))

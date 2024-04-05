@@ -5,6 +5,8 @@
 (require "interp-Lvar.rkt")
 (require "interp-Cvar.rkt")
 (require "interp-Lif.rkt")
+(require "interp-Lwhile.rkt")
+(require "type-check-Lwhile.rkt")
 (require "type-check-Lif.rkt")
 (require "interp.rkt")
 (require "compiler.rkt")
@@ -28,8 +30,8 @@
         all-tests)))
 
 ;; The following tests the intermediate-language outputs of the passes.
-(interp-tests "cond" type-check-Lif compiler-passes interp-Lif "cond_test" (tests-for "cond"))
+(interp-tests "while" type-check-Lwhile compiler-passes interp-Lwhile "while_test" (tests-for "while"))
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.
-(compiler-tests "cond" type-check-Lif compiler-passes "cond_test" (tests-for "cond"))
+;; (compiler-tests "while" type-check-Lwhile compiler-passes "while_test" (tests-for "while"))
