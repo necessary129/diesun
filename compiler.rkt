@@ -1,28 +1,20 @@
 #lang racket
-(require racket/set
-         racket/stream)
+(require racket/set)
 (require racket/fixnum)
 (require racket/set)
 (require racket/promise)
 (require graph)
-(require "interp-Lint.rkt")
-(require "interp-Lvar.rkt")
-(require "interp-Cvar.rkt")
-(require "interp-Lif.rkt")
-(require "interp-Cif.rkt")
+(require data/queue)
 (require "interp.rkt")
-(require "type-check-Lvar.rkt")
-(require "type-check-Cvar.rkt")
-(require "type-check-Lif.rkt")
+(require "interp-Cwhile.rkt")
 (require "interp-Lwhile.rkt")
 (require "type-check-Lwhile.rkt")
-(require "type-check-Cif.rkt")
+(require "type-check-Cwhile.rkt")
 (require "utilities.rkt")
 (require "priority_queue.rkt")
 (require "multigraph.rkt")
-(require "graph-printing.rkt")
+
 (provide (all-defined-out))
-(define reserved-registers (set 'rax 'r11 'r15 'rsp 'rbp))
 (define (uniquify-exp env)
   (lambda (e)
     (define recur (uniquify-exp env))
@@ -95,6 +87,7 @@
 (define (rco_atom e)
   (match e
     [(Var _) (values e '())]
+    [(Void) (values e '())]
     [(Int i) #:when(> (abs i) 2147483647) (let ([tmpvar (gensym 'tmp)])
                                             (values (Var tmpvar) `((,tmpvar . ,(Int i)))))]
     [(Int _) (values e '())]
@@ -107,7 +100,13 @@
     [(Prim op es)
      (match-let ([(list aexps binds) (accumulate_aexps es)])
        (let ([tmpvar (gensym 'tmp)])
-         (values (Var tmpvar) `((,tmpvar . ,(Prim op aexps)) ,@binds))))]))
+         (values (Var tmpvar) `((,tmpvar . ,(Prim op aexps)) ,@binds))))]
+    [(WhileLoop con body) (let ([tmpvar (gensym 'tmp)])
+                            (values (Var tmpvar) `((,tmpvar . ,(WhileLoop (rco_exp con) (rco_exp body))))))]
+    [(GetBang var) (let ([tmpvar (gensym 'tmp)])
+                     (values (Var tmpvar) `((,tmpvar . ,(Var var)))))]
+    [(Begin e* e) (let ([tmpvar (gensym 'tmp)])
+                    (values (Var tmpvar) `((,tmpvar . ,(Begin (map rco_exp e*) (rco_exp e))))))]))
 
 (define (makeMultiLet binds body)
   (foldl (lambda (bind body) (Let (car bind) (cdr bind) body)) body binds))
@@ -119,6 +118,10 @@
      (match-let ([(list aexps binds) (accumulate_aexps es)])
        (makeMultiLet binds (Prim op aexps)))]
     [(If c t e) (If (rco_exp c) (rco_exp t) (rco_exp e))]
+    [(WhileLoop con body) (WhileLoop (rco_exp con) (rco_exp body))]
+    [(SetBang var rhs) (SetBang var (rco_exp rhs))]
+    [(GetBang var) (Var var)]
+    [(Begin e* e) (Begin (map rco_exp e*) (rco_exp e))]
     [_ e]))
 
 ;; remove-complex-opera* : Lvar -> Lvar^mon
@@ -126,16 +129,37 @@
   (match p
     [(Program info e) (Program info (rco_exp e))]))
 
+(define (explicate_effect e cont)
+  (lazy
+   (match e
+     [(SetBang v rhs) (explicate_assign rhs v cont)]
+     [(Prim 'read _) (Seq e (force cont))]
+     [(WhileLoop cnd body) (let* ([label (gensym 'loop)]
+                                  [newbody (force (explicate_effect body (Goto label)))]
+                                  [newblock (force (explicate_pred cnd newbody cont))])
+                             (get-basic-blocks (cons (cons label newblock) (get-basic-blocks)))
+                             (Goto label))]
+     [(Begin es body) (for/fold ([cont (force (explicate_effect body cont))])
+                                ([e es])
+                        (force (explicate_effect e cont)))]
+     [_ cont])))
+
 (define (explicate_tail e)
   (lazy
-    (match e
-      [(Var x) (Return (Var x))]
-      [(Int n) (Return (Int n))]
-      [(Let x rhs body) (explicate_assign rhs x (explicate_tail body))]
-      [(Prim op es) (Return (Prim op es))]
-      [(Bool b) (Return (Bool b))]
-      [(If cnd thn els) (explicate_pred cnd (explicate_tail thn) (explicate_tail els))]
-      [_ (error "explicate_tail unhandled case" e)])))
+   (match e
+     [(Var x) (Return (Var x))]
+     [(Int n) (Return (Int n))]
+     [(Let x rhs body) (explicate_assign rhs x (explicate_tail body))]
+     [(Prim op es) (Return (Prim op es))]
+     [(Bool b) (Return (Bool b))]
+     [(Void) (Return (Void))]
+     [(Begin es body) (for/fold ([cont (force (explicate_tail body))])
+                                ([e es])
+                        (force (explicate_effect e cont)))]
+     [(SetBang _ _) (explicate_effect e (explicate_tail (Void)))]
+     [(WhileLoop _ _) (explicate_effect e (explicate_tail (Void)))]
+     [(If cnd thn els) (explicate_pred cnd (explicate_tail thn) (explicate_tail els))]
+     [_ (error "explicate_tail unhandled case" e)])))
 
 (define (explicate_assign e x cont)
   (lazy
@@ -146,6 +170,12 @@
       [(Prim op es) (Seq (Assign (Var x) (Prim op es)) (force cont))]
       [(Bool b) (Seq (Assign (Var x) (Bool b)) (force cont))]
       [(If cnd thn els) (explicate_pred cnd (explicate_assign thn x cont) (explicate_assign els x cont))]
+      [(Void) (Seq (Assign (Var x) (Void)) (force cont))]
+      [(SetBang _ _) (explicate_effect e (explicate_assign (Void) x cont))]
+      [(WhileLoop _ _) (explicate_effect e (explicate_assign (Void) x cont))]
+      [(Begin es body) (for/fold ([cont (force (explicate_assign body x cont))])
+                                ([e es])
+                        (force (explicate_effect e cont)))]
       [_ (error "explicate_assign unhandled case" e)])))
 
 (define (create_block tail)
@@ -170,6 +200,9 @@
         [(If ncnd nthn nels) (explicate_pred ncnd
                                              (explicate_pred nthn thnblock elsblock)
                                              (explicate_pred nels thnblock elsblock))]
+        [(Begin es body) (for/fold ([cont (force (explicate_pred body thn els))])
+                                ([e es])
+                        (force (explicate_effect e cont)))]
         [else (error "explicate_pred unhandled case " cnd)]))))
 
 (define (explicate-control p)
@@ -295,6 +328,7 @@
   (match p
     [(Int n) (Imm n)]
     [(Var v) (Var v)]
+    [(Void) (Imm 0)]
     [(Bool #t) (Imm 1)]
     [(Bool #f) (Imm 0)]))
 
@@ -335,9 +369,10 @@
      #:when (equal? v v1)
      (list (Instr 'addq (list (select-inst-atom a2) (Var v))))]
     [(Assign (Var v) (Prim 'not (list (Var v1))))
-      #:when (equal? v v1)
-      (list (Instr 'xorq (list (Int 1) (Var v1))))]
-    [(Assign v e) (select-inst-assgn v e)]))
+     #:when (equal? v v1)
+     (list (Instr 'xorq (list (Int 1) (Var v1))))]
+    [(Assign v e) (select-inst-assgn v e)]
+    [(Prim 'read _) (list (Callq 'read_int 0))]))
 
 (define (select-inst-tail tail)
   (match tail
@@ -406,12 +441,34 @@
     [(Block info code) (let ([livesets (get_live code ini lbl->live)])
                          (Block (dict-set* info 'lbefore (car livesets) 'lafter (cdr livesets)) code))]))
 
+(define (analyze_dataflow G transfer bottom join)
+  (define mapping (make-hash (list (cons 'conclusion (set 'rax 'rsp)))))
+  (for ([v (in-vertices G)])
+    (dict-set! mapping v bottom))
+  (define worklist (make-queue))
+  (for ([v (in-vertices G)])
+    (enqueue! worklist v))
+  (define trans-G (transpose G))
+  (while (not (queue-empty? worklist))
+         (define node (dequeue! worklist))
+         (define input (for/fold ([state bottom])
+                                 ([pred (in-neighbors trans-G node)])
+                         (join state (dict-ref mapping pred))))
+         (define output (transfer node input))
+         (cond [(not (equal? output (dict-ref mapping node)))
+                (dict-set! mapping node output)
+                (for ([v (in-neighbors G node)])
+                  (enqueue! worklist v))]))
+  mapping
+  )
+
 (define (uncover_live p)
   (match p
     [(X86Program info blocks)
      (let* ([cfg (build_cfg blocks)]
-            [vert-list (tsort (transpose cfg))]
-            [label->live (dict-set '() 'conclusion (set 'rax 'rsp))])
+            ;; [vert-list (tsort (transpose cfg))]
+            ;; [label->live (dict-set '() 'conclusion (set 'rax 'rsp))]
+            )
        ;; (printf "cfg: ~a vert: ~a~n" cfg vert-list)
        ;; (print-graph cfg)
        (define uncover (lambda (vlist nblocks lbl->live)
@@ -425,15 +482,18 @@
        ;;     (let ([newblock (uncover_block (dict-ref blocks v) label->live)])
        ;;       (dict-set! label->live v (dict-ref (Block-info newblock) 'lbefore))
        ;;       (dict-set! newblocks v newblock))))
-       (define-values (nblocks lbl-live) (uncover vert-list '() label->live))
+       ;; (define-values (nblocks lbl-live) (uncover vert-list '() label->live))
+       (define (transfer label lafter)
+         label)
        (X86Program (dict-set info 'label->live lbl-live) nblocks))]))
+
 
 (define (build_cfg blocks)
   (let* ([get_succ (lambda (code)
                      (foldl (lambda (instr succset)
                               (match instr
                                 [(Jmp label) ;; #:when (not (equal? label 'conclusion))
-                                  (set-add succset label)
+                                 (set-add succset label)
                                  ]
                                 [(JmpIf _ label) (set-add succset label)]
                                 [_ succset]))
@@ -733,9 +793,9 @@
     ;; ("Partial eval" ,partial-eval ,interp-Lif ,type-check-Lif)
     ("uniquify" ,uniquify ,interp-Lwhile ,type-check-Lwhile)
     ("uncover-get!" ,uncover-get! ,interp-Lwhile ,type-check-Lwhile )
-    ;; ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
-    ;; ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
-    ;; ("select instructions" , select-instructions ,interp-pseudo-x86-1)
+    ("remove complex opera*" ,remove-complex-opera* ,interp-Lwhile ,type-check-Lwhile)
+    ("explicate control" ,explicate-control ,interp-Cwhile ,type-check-Cwhile)
+    ("select instructions" , select-instructions ,interp-pseudo-x86-1)
     ;; ("uncover live" ,uncover_live ,interp-pseudo-x86-1)
     ;; ("build_interference" ,build_interference ,interp-pseudo-x86-1)
     ; ("allocate_registers" ,assign-homes ,interp-pseudo-x86-1)
