@@ -224,6 +224,7 @@
     [(Var _) p]
     [(Int _) p]
     [(Bool _) p]
+    [(Void) p]
     [(Let y rhs body) (Let y (shrink-exp rhs) (shrink-exp body))]
     [(Prim op es) (Prim op (map shrink-exp es))]
     [(If c t e) (If (shrink-exp c) (shrink-exp t) (shrink-exp e))]
