@@ -23,10 +23,16 @@
  [VariableReference Expression (name)
                     #:prop reference-info (read)]
  [SetBang Expression (name Expression)
-          #:prop reference-info (write #:unifies Expression)]
+          #:prop reference-info (write #:unifies Expression)
+          ;; #:prop choice-weight 100
+          ]
  [Begin Expression ([es : Expression * = 2] [body : Expression])
- 	#:prop strict-child-order? #t ]
- [WhileLoop Expression ([cnd : Expression] [body : Expression]) #:prop choice-weight 55]
+        #:prop strict-child-order? #t
+        ;; #:prop choice-weight 100
+        ]
+ [WhileLoop Expression ([cnd : Expression] [body : Expression])
+            ;; #:prop choice-weight 55
+            ]
  [LiteralInt Expression ([v = (random-bits 40)])]
  [Addition Expression ([es : Expression * = 2])
            ;; #:prop choice-weight 25
@@ -62,7 +68,7 @@
            (λ (n t) (hash 'definitions (λ (cn) (fresh-type-variable))
                           'sideEs (λ (cn) (fresh-type-variable))
                           'Expression t
-						  'WhileLoop voidt))]]
+                          'WhileLoop voidt))]]
  [LiteralInt [int (λ (n t) (hash))]]
  [PrimRead [int (λ (n t) (hash))]]
  [VariableReference [(fresh-type-variable) (λ (n t) (hash))]]
@@ -92,7 +98,7 @@
                      'r bool))]]
  [OpNot [bool (lambda (n t)
                 (hash 'e bool))]]
-  [VoidExpression [voidt (lambda (n t) (hash))]]
+ [VoidExpression [voidt (lambda (n t) (hash))]]
  [IfStmt [(fresh-type-variable) (lambda (n t)
                                   (hash 'cond bool
                                         'then t

@@ -1,3 +1,4 @@
+
 #lang racket
 (require racket/set)
 (require racket/fixnum)
@@ -254,6 +255,7 @@
       [(Prim '+ (list e1 e2)) ((pe_add env) ((pe_neg env) e1) ((pe_neg env) e2))]
       [(Prim '- (list e1 e2)) ((pe_add env) ((pe_neg env) e1) e2)]
       [(Prim '- (list e)) e]
+
       ;; [(Prim (? (or/c '+ '-) op) (list (Int n1) e)) (Prim op (list (Int ((if (eq? op '+) fx- fx+) 0 n1)) (Prim (if (eq? op '+) '+ '-) (list (pe_exp e)))))]
       [_ (Prim '- (list r1))])))
 
@@ -485,7 +487,10 @@
        ;; (define-values (nblocks lbl-live) (uncover vert-list '() label->live))
        (define (transfer label lafter)
          label)
-       (X86Program (dict-set info 'label->live lbl-live) nblocks))]))
+       (X86Program (dict-set info 'label->live ;; lbl-live
+                             '()) ;; nblocks
+                    '()
+                   ))]))
 
 
 (define (build_cfg blocks)
