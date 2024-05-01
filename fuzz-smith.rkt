@@ -105,7 +105,7 @@
                                         'else t))]]
  [LiteralBool [bool (lambda (n t) (hash))]]
 
- [Program [(fresh-type-variable) (lambda (n t) (hash 'LetStar t))]]
+ [Program [int (lambda (n t) (hash 'LetStar t))]]
 
  [Subtraction [int (λ (n t) (hash 'es t))]]
  [WhileLoop [voidt (lambda (n t) (hash 'cnd bool 'body (lambda (cn) (fresh-type-variable))))]]
