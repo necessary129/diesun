@@ -6,6 +6,7 @@ for _ in $(seq 1 "$reads"); do
 	echo $RANDOM >>"${testname}.in"
 done
 echo "#lang racket" > "${testname}1.rkt"
+echo "(require dyoo-while-loop)" >> "${testname}1.rkt"
 cat "${testname}.rkt" >> "${testname}1.rkt"
 res="$(racket ${testname}1.rkt <${testname}.in)"
 case $res in
@@ -14,4 +15,4 @@ case $res in
 *) reso="$((((res % 256) + 256) % 256))" ;;
 esac
 echo "$reso" >"${testname}.res"
-rm "${testname}1.rkt"
+#rm "${testname}1.rkt"

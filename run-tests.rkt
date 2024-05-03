@@ -34,4 +34,4 @@
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.
-;; (compiler-tests "while" type-check-Lwhile compiler-passes "while_test" (tests-for "while"))
+(compiler-tests "while" type-check-Lwhile compiler-passes "while_test" (tests-for "while"))

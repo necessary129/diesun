@@ -66,6 +66,7 @@
     [(Let x rhs body) (Let x (recur rhs) (recur body))]
     [(Int _) e]
     [(Bool _) e]
+    [(Void) e]
     [(SetBang var rhs) (SetBang var (recur rhs))]
     [(If c t e) (If (recur c) (recur t) (recur e))]
     [(Begin e* e) (Begin (for/list ([e e*]) (recur e)) (recur e))]
@@ -107,7 +108,9 @@
     [(GetBang var) (let ([tmpvar (gensym 'tmp)])
                      (values (Var tmpvar) `((,tmpvar . ,(Var var)))))]
     [(Begin e* e) (let ([tmpvar (gensym 'tmp)])
-                    (values (Var tmpvar) `((,tmpvar . ,(Begin (map rco_exp e*) (rco_exp e))))))]))
+                    (values (Var tmpvar) `((,tmpvar . ,(Begin (map rco_exp e*) (rco_exp e))))))]
+    [(SetBang var rhs) (let ([tmpvar (gensym 'tmp)])
+                         (values (Var tmpvar) `((,tmpvar . ,(SetBang var (rco_exp rhs))))))]))
 
 (define (makeMultiLet binds body)
   (foldl (lambda (bind body) (Let (car bind) (cdr bind) body)) body binds))
@@ -417,8 +420,8 @@
       [(Instr _ (cons (Var v) _)) (set-add sset v)]
       [(Instr _ (cons (Reg v) _)) (set-add sset v)]
       [(Callq _ arity) (list->set (take arg-regs arity))]
-      [(Jmp label) (dict-ref lbl->live label (set))]
-      [(JmpIf _ label) (dict-ref lbl->live label (set))]
+      [(Jmp label) lbl->live]
+      [(JmpIf _ label) lbl->live]
       [_ sset])))
 
 (define (uncover_write instr)
@@ -444,8 +447,18 @@
     [(Block info code) (let ([livesets (get_live code ini lbl->live)])
                          (Block (dict-set* info 'lbefore (car livesets) 'lafter (cdr livesets)) code))]))
 
+
+(define (transfer label lafter)
+  (if (eq? label 'conclusion)
+      (set 'rax 'rsp)
+      (match (dict-ref (get-basic-blocks) label)
+        [(Block info code)
+         (let ([livesets (get_live code lafter lafter)])
+           (get-basic-blocks (dict-set (get-basic-blocks) label (Block (dict-set* info 'lbefore (car livesets) 'lafter (cdr livesets)) code)))
+           (car livesets))])))
+
 (define (analyze_dataflow G transfer bottom join)
-  (define mapping (make-hash (list (cons 'conclusion (set 'rax 'rsp)))))
+  (define mapping (make-hash))
   (for ([v (in-vertices G)])
     (dict-set! mapping v bottom))
   (define worklist (make-queue))
@@ -453,45 +466,52 @@
     (enqueue! worklist v))
   (define trans-G (transpose G))
   (while (not (queue-empty? worklist))
-         (define node (dequeue! worklist))
-         (define input (for/fold ([state bottom])
-                                 ([pred (in-neighbors trans-G node)])
-                         (join state (dict-ref mapping pred))))
-         (define output (transfer node input))
-         (cond [(not (equal? output (dict-ref mapping node)))
-                (dict-set! mapping node output)
-                (for ([v (in-neighbors G node)])
-                  (enqueue! worklist v))]))
-  mapping
-  )
+    (define node (dequeue! worklist))
+    (define input (for/fold ([state bottom])
+                            ([pred (in-neighbors trans-G node)])
+                    (join state (dict-ref mapping pred))))
+    (define output (transfer node input))
+    (cond [(not (equal? output (dict-ref mapping node)))
+           (dict-set! mapping node output)
+           (for ([v (in-neighbors G node)])
+             (enqueue! worklist v))]))
+  mapping)
 
 (define (uncover_live p)
   (match p
     [(X86Program info blocks)
-     (let* ([cfg (build_cfg blocks)]
-            ;; [vert-list (tsort (transpose cfg))]
-            ;; [label->live (dict-set '() 'conclusion (set 'rax 'rsp))]
-            )
-       ;; (printf "cfg: ~a vert: ~a~n" cfg vert-list)
-       ;; (print-graph cfg)
-       (define uncover (lambda (vlist nblocks lbl->live)
-                         (match vlist
-                           [`(conclusion . ,rest) (uncover rest nblocks lbl->live)]
-                           [`(,v . ,rest) (let ([newblock (uncover_block (dict-ref blocks v) lbl->live)])
-                                            (uncover rest (cons (cons v newblock) nblocks) (dict-set lbl->live v (dict-ref (Block-info newblock) 'lbefore))))]
-                           ['() (values nblocks lbl->live)])))
-       ;; (for ([v vert-list])
-       ;;   (unless (equal? v 'conclusion)
-       ;;     (let ([newblock (uncover_block (dict-ref blocks v) label->live)])
-       ;;       (dict-set! label->live v (dict-ref (Block-info newblock) 'lbefore))
-       ;;       (dict-set! newblocks v newblock))))
-       ;; (define-values (nblocks lbl-live) (uncover vert-list '() label->live))
-       (define (transfer label lafter)
-         label)
-       (X86Program (dict-set info 'label->live ;; lbl-live
-                             '()) ;; nblocks
-                    '()
-                   ))]))
+     (parameterize ([get-basic-blocks blocks])
+       (let ([cfg (build_cfg blocks)])
+         (analyze_dataflow (transpose cfg) transfer (set) set-union)
+         (X86Program info (get-basic-blocks))))]))
+
+;; (define (uncover_live p)
+;;   (match p
+;;     [(X86Program info blocks)
+;;      (let* ([cfg (build_cfg blocks)]
+;;             ;; [vert-list (tsort (transpose cfg))]
+;;             ;; [label->live (dict-set '() 'conclusion (set 'rax 'rsp))]
+;;             )
+;;        ;; (printf "cfg: ~a vert: ~a~n" cfg vert-list)
+;;        ;; (print-graph cfg)
+;;        (define uncover (lambda (vlist nblocks lbl->live)
+;;                          (match vlist
+;;                            [`(conclusion . ,rest) (uncover rest nblocks lbl->live)]
+;;                            [`(,v . ,rest) (let ([newblock (uncover_block (dict-ref blocks v) lbl->live)])
+;;                                             (uncover rest (cons (cons v newblock) nblocks) (dict-set lbl->live v (dict-ref (Block-info newblock) 'lbefore))))]
+;;                            ['() (values nblocks lbl->live)])))
+;;        ;; (for ([v vert-list])
+;;        ;;   (unless (equal? v 'conclusion)
+;;        ;;     (let ([newblock (uncover_block (dict-ref blocks v) label->live)])
+;;        ;;       (dict-set! label->live v (dict-ref (Block-info newblock) 'lbefore))
+;;        ;;       (dict-set! newblocks v newblock))))
+;;        ;; (define-values (nblocks lbl-live) (uncover vert-list '() label->live))
+;;        (define (transfer label lafter)
+;;          label)
+;;        (X86Program (dict-set info 'label->live ;; lbl-live
+;;                              '()) ;; nblocks
+;;                     '()
+;;                    ))]))
 
 
 (define (build_cfg blocks)
@@ -802,15 +822,12 @@
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lwhile ,type-check-Lwhile)
     ("explicate control" ,explicate-control ,interp-Cwhile ,type-check-Cwhile)
     ("select instructions" , select-instructions ,interp-pseudo-x86-1)
-    ;; ("uncover live" ,uncover_live ,interp-pseudo-x86-1)
-    ;; ("build_interference" ,build_interference ,interp-pseudo-x86-1)
-    ; ("allocate_registers" ,assign-homes ,interp-pseudo-x86-1)
-    ; ("instruction selection" ,select-instructions ,interp-pseudo-x86-0)
-    ;; ("build interference" ,build_interference ,interp-pseudo-x86-1)
-    ;; ("build mov graph" ,build_mov_graph ,interp-pseudo-x86-1)
-    ;; ("reg-color" ,reg-color ,interp-pseudo-x86-1)
-    ;; ("assign homes" ,assign-homes ,interp-x86-1)
-    ;; ("patch instructions" ,patch-instructions ,interp-x86-1)
-    ;; ("patch instructions 2" ,patch-instructions ,interp-x86-1)
-    ;; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-1)
+    ("uncover live" ,uncover_live ,interp-pseudo-x86-1)
+    ("build interference" ,build_interference ,interp-pseudo-x86-1)
+    ("build mov graph" ,build_mov_graph ,interp-pseudo-x86-1)
+    ("reg-color" ,reg-color ,interp-pseudo-x86-1)
+    ("assign homes" ,assign-homes ,interp-x86-1)
+    ("patch instructions" ,patch-instructions ,interp-x86-1)
+    ("patch instructions 2" ,patch-instructions ,interp-x86-1)
+    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-1)
     ))
