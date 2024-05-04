@@ -540,9 +540,9 @@
 
 (define (get_edge_instr instr lafter)
   (match instr
-    [(Instr 'movq (list (app get-val s) (app get-val d))) (for/list ([v lafter] #:unless (and (equal? s d) ((or/c s d) v)))
+    [(Instr 'movq (list (app get-val s) (app get-val d))) (for/list ([v lafter] #:unless ((or/c s d) v))
                                 `(,v ,d))]
-    [(Instr 'movzbq (list (app get-val s) (app get-val d))) (for/list ([v lafter] #:unless (and (equal? s d) ((or/c s d) v)))
+    [(Instr 'movzbq (list (app get-val s) (app get-val d))) (for/list ([v lafter] #:unless ((or/c s d) v))
                                 `(,v ,d))]
     [_ (let ([Wset (uncover_write instr)])
          (for*/list ([v lafter] [d (set->list Wset)] #:unless (equal? d v))
