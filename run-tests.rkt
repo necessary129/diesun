@@ -4,7 +4,9 @@
 (require "utilities.rkt")
 (require "interp-Lvar.rkt")
 (require "interp-Cvar.rkt")
-(require "interp-Lif.rkt")
+(require "interp-Lvec.rkt")
+(require "interp-Lwhile.rkt")
+(require "type-check-Lvec.rkt")
 (require "interp-Lwhile.rkt")
 (require "type-check-Lwhile.rkt")
 (require "type-check-Lif.rkt")
@@ -30,8 +32,8 @@
         all-tests)))
 
 ;; The following tests the intermediate-language outputs of the passes.
-(interp-tests "while" type-check-Lwhile compiler-passes interp-Lwhile "while_test" (tests-for "while"))
+(interp-tests "vectors" type-check-Lvec compiler-passes interp-Lvec "vectors_test" (tests-for "vectors"))
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.
-(compiler-tests "while" type-check-Lwhile compiler-passes "while_test" (tests-for "while"))
+(compiler-tests "vectors" type-check-Lvec compiler-passes "vectors_test" (tests-for "vectors"))
