@@ -7,11 +7,11 @@
 (require graph)
 (require data/queue)
 (require "interp.rkt")
-(require "interp-Cvec.rkt")
-(require "interp-Lvec.rkt")
+(require "interp-Cfun.rkt")
+(require "interp-Lfun.rkt")
 (require "interp-Lvec-prime.rkt")
-(require "type-check-Lvec.rkt")
-(require "type-check-Cvec.rkt")
+(require "type-check-Lfun.rkt")
+(require "type-check-Cfun.rkt")
 (require "type-check-Lvecof.rkt")
 (require "utilities.rkt")
 (require "priority_queue.rkt")
@@ -221,50 +221,50 @@
 
 (define (explicate_assign e x cont)
   (lazy
-    (match e
-      [(Collect _) (Seq (Assign (Var x) e) (force cont))]
-      [(Var y) (Seq (Assign (Var x) (Var y)) (force cont))]
-      [(Allocate _ _) (Seq (Assign (Var x) e) (force cont))]
-      [(GlobalValue _) (Seq (Assign (Var x) e) (force cont))]
-      [(Int n) (Seq (Assign (Var x) (Int n)) (force cont))]
-      [(Let y rhs body) (explicate_assign rhs y (explicate_assign body x cont))]
-      [(Prim op es) (Seq (Assign (Var x) (Prim op es)) (force cont))]
-      [(Bool b) (Seq (Assign (Var x) (Bool b)) (force cont))]
-      [(If cnd thn els) (explicate_pred cnd (explicate_assign thn x cont) (explicate_assign els x cont))]
-      [(Void) (Seq (Assign (Var x) (Void)) (force cont))]
-      [(SetBang _ _) (explicate_effect e (explicate_assign (Void) x cont))]
-      [(WhileLoop _ _) (explicate_effect e (explicate_assign (Void) x cont))]
-      [(Begin es body) (for/fold ([cont (force (explicate_assign body x cont))])
-                                 ([e es])
-                         (force (explicate_effect e cont)))]
-      [_ (error "explicate_assign unhandled case" e)])))
+   (match e
+     [(Collect _) (Seq (Assign (Var x) e) (force cont))]
+     [(Var y) (Seq (Assign (Var x) (Var y)) (force cont))]
+     [(Allocate _ _) (Seq (Assign (Var x) e) (force cont))]
+     [(GlobalValue _) (Seq (Assign (Var x) e) (force cont))]
+     [(Int n) (Seq (Assign (Var x) (Int n)) (force cont))]
+     [(Let y rhs body) (explicate_assign rhs y (explicate_assign body x cont))]
+     [(Prim op es) (Seq (Assign (Var x) (Prim op es)) (force cont))]
+     [(Bool b) (Seq (Assign (Var x) (Bool b)) (force cont))]
+     [(If cnd thn els) (explicate_pred cnd (explicate_assign thn x cont) (explicate_assign els x cont))]
+     [(Void) (Seq (Assign (Var x) (Void)) (force cont))]
+     [(SetBang _ _) (explicate_effect e (explicate_assign (Void) x cont))]
+     [(WhileLoop _ _) (explicate_effect e (explicate_assign (Void) x cont))]
+     [(Begin es body) (for/fold ([cont (force (explicate_assign body x cont))])
+                                ([e es])
+                        (force (explicate_effect e cont)))]
+     [_ (error "explicate_assign unhandled case" e)])))
 
 (define (create_block tail)
   (lazy
-    (define t (force tail))
-    (match t
-      [(Goto label) (Goto label)]
-      [else
-       (let ([label (gensym 'block)])
-         (get-basic-blocks (cons (cons label t) (get-basic-blocks)))
-         (Goto label))])))
+   (define t (force tail))
+   (match t
+     [(Goto label) (Goto label)]
+     [else
+      (let ([label (gensym 'block)])
+        (get-basic-blocks (cons (cons label t) (get-basic-blocks)))
+        (Goto label))])))
 
 (define (explicate_pred cnd thn els)
   (lazy
-    (let ([thnblock (create_block thn)] [elsblock (create_block els)])
-      (match cnd
-        [(Var x) (IfStmt (Prim 'eq? (list (Var x) (Bool #t))) (force thnblock) (force elsblock))]
-        [(Let x rhs body) (explicate_assign rhs x (explicate_pred body thnblock elsblock))]
-        [(Prim 'not (list e)) (explicate_pred e elsblock thnblock)]
-        [(Prim (? (or/c 'eq? '< '> '<= '>=) op) es) (IfStmt (Prim op es) (force thnblock) (force elsblock))]
-        [(Bool b) (if b thnblock elsblock)]
-        [(If ncnd nthn nels) (explicate_pred ncnd
-                                             (explicate_pred nthn thnblock elsblock)
-                                             (explicate_pred nels thnblock elsblock))]
-        [(Begin es body) (for/fold ([cont (force (explicate_pred body thnblock elsblock))])
-                                ([e es])
-                        (force (explicate_effect e cont)))]
-        [else (error "explicate_pred unhandled case " cnd)]))))
+   (let ([thnblock (create_block thn)] [elsblock (create_block els)])
+     (match cnd
+       [(Var x) (IfStmt (Prim 'eq? (list (Var x) (Bool #t))) (force thnblock) (force elsblock))]
+       [(Let x rhs body) (explicate_assign rhs x (explicate_pred body thnblock elsblock))]
+       [(Prim 'not (list e)) (explicate_pred e elsblock thnblock)]
+       [(Prim (? (or/c 'eq? '< '> '<= '>=) op) es) (IfStmt (Prim op es) (force thnblock) (force elsblock))]
+       [(Bool b) (if b thnblock elsblock)]
+       [(If ncnd nthn nels) (explicate_pred ncnd
+                                            (explicate_pred nthn thnblock elsblock)
+                                            (explicate_pred nels thnblock elsblock))]
+       [(Begin es body) (for/fold ([cont (force (explicate_pred body thnblock elsblock))])
+                                  ([e es])
+                          (force (explicate_effect e cont)))]
+       [else (error "explicate_pred unhandled case " cnd)]))))
 
 (define (explicate-control p)
   (parameterize ([get-basic-blocks '()])
@@ -273,9 +273,15 @@
                              (get-basic-blocks (cons `(start . ,startblock) (get-basic-blocks)))
                              (CProgram info (get-basic-blocks)))])))
 
+(define (shrink-def d)
+  (match d
+    [(Def name params rty info body) (Def name params rty info (shrink-exp body))]))
+
 (define (shrink p)
   (match p
-    [(Program info e) (Program info (shrink-exp e))]))
+    [(ProgramDefsExp info defs body) (ProgramDefs info
+                                                  (for/list ([def (cons (Def 'main '() 'Integer '() body) defs)])
+                                                    (shrink-def def)))]))
 
 (define (shrink-exp p)
   (match p
@@ -291,6 +297,7 @@
     [(Begin e* e) (Begin (for/list ([e e*]) (shrink-exp e)) (shrink-exp e))]
     [(WhileLoop cnd body) (WhileLoop (shrink-exp cnd) (shrink-exp body))]
     [(SetBang var rhs) (SetBang var (shrink-exp rhs))]
+    [(Apply f e*) (Apply (shrink-exp f) (map shrink-exp e*))]
     [_ (error "shrink-exp unhandled case" p)]
     )
 )
@@ -941,20 +948,20 @@
 (define compiler-passes
   ;; Uncomment the following passes as you finish them.
   `(
-    ("Shrink" ,shrink ,interp-Lvec ,type-check-Lvec)
+    ("Shrink" ,shrink ,interp-Lfun ,type-check-Lfun)
     ;; ("Partial eval" ,partial-eval ,interp-Lif ,type-check-Lif)
-    ("uniquify" ,uniquify ,interp-Lvec ,type-check-Lvec)
-    ("uncover-get!" ,uncover-get! ,interp-Lvec ,type-check-Lvec-has-type )
-    ("expose allocation" ,expose_allocation ,interp-Lvec-prime)
-    ("remove complex opera*" ,remove-complex-opera* ,interp-Lvec-prime)
-    ("explicate control" ,explicate-control ,interp-Cvec ,type-check-Cvec)
-    ("select instructions" , select-instructions ,interp-pseudo-x86-2)
-    ("uncover live" ,uncover_live ,interp-pseudo-x86-2)
-    ("build interference" ,build_interference ,interp-pseudo-x86-2)
-    ("build mov graph" ,build_mov_graph ,interp-pseudo-x86-2)
-    ("reg-color" ,reg-color ,interp-pseudo-x86-2)
-    ("assign homes" ,assign-homes ,interp-x86-2)
-    ("patch instructions" ,patch-instructions ,interp-x86-2)
-    ("patch instructions 2" ,patch-instructions ,interp-x86-2)
-    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-2)
+    ;; ("uniquify" ,uniquify ,interp-Lvec ,type-check-Lvec)
+    ;; ("uncover-get!" ,uncover-get! ,interp-Lvec ,type-check-Lvec-has-type )
+    ;; ("expose allocation" ,expose_allocation ,interp-Lvec-prime)
+    ;; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvec-prime)
+    ;; ("explicate control" ,explicate-control ,interp-Cvec ,type-check-Cvec)
+    ;; ("select instructions" , select-instructions ,interp-pseudo-x86-2)
+    ;; ("uncover live" ,uncover_live ,interp-pseudo-x86-2)
+    ;; ("build interference" ,build_interference ,interp-pseudo-x86-2)
+    ;; ("build mov graph" ,build_mov_graph ,interp-pseudo-x86-2)
+    ;; ("reg-color" ,reg-color ,interp-pseudo-x86-2)
+    ;; ("assign homes" ,assign-homes ,interp-x86-2)
+    ;; ("patch instructions" ,patch-instructions ,interp-x86-2)
+    ;; ("patch instructions 2" ,patch-instructions ,interp-x86-2)
+    ;; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-2)
     ))
