@@ -19,6 +19,8 @@
 (require "runtime-config.rkt")
 
 (define basic-blocks (make-parameter '()))
+(define gen-tail-conc (make-parameter #f))
+(define fname (make-parameter null))
 
 (provide (all-defined-out))
 (define (uniquify-exp env)
@@ -473,11 +475,12 @@
 (define (select-instructions-def d)
   (match d
     [(Def name params rty info blocks)
-     (Def name '() 'Integer (dict-set info 'num-params (length params)) (for/list ([block blocks])
-                                                                          (cons (car block) (Block '() (append (if (eq? (symbol-append name '_start) (car block))
-                                                                                                                   (assign-args params)
-                                                                                                                   '())
-                                                                                                               (select-inst-tail (cdr block)))))))]))
+     (parameterize ([fname name])
+       (Def name '() 'Integer (dict-set info 'num-params (length params)) (for/list ([block blocks])
+                                                                            (cons (car block) (Block '() (append (if (eq? (symbol-append name '_start) (car block))
+                                                                                                                     (assign-args params)
+                                                                                                                     '())
+                                                                                                                 (select-inst-tail (cdr block))))))))]))
 
 ;; select-instructions : Cvar -> x86var
 (define (select-instructions p)
@@ -581,7 +584,7 @@
 
 (define (select-inst-tail tail)
   (match tail
-    [(Return e) (append (select-inst-assgn (Reg 'rax) e) (list (Jmp 'conclusion)))]
+    [(Return e) (append (select-inst-assgn (Reg 'rax) e) (list (Jmp (symbol-append (fname) '_conclusion))))]
     [(Seq s t) (append (select-inst-stmt s) (select-inst-tail t))]
     [(Goto l) (list (Jmp l))]
     [(IfStmt (Prim cmp (list arg1 arg2)) (Goto l1) (Goto l2)) 
@@ -659,7 +662,7 @@
 
 (define (transfer label lafter)
   ;; (printf "TRANSFER: ~a ~a~n" label lafter)
-  (if (eq? label 'conclusion)
+  (if (eq? label (symbol-append (fname) '_conclusion))
       (set 'rax 'rsp)
       (match (dict-ref (basic-blocks) label)
         [(Block info code)
@@ -690,7 +693,7 @@
 
 (define (uncover_live-def d)
   (match d
-    [(Def name params rty info blocks) (parameterize ([basic-blocks blocks])
+    [(Def name params rty info blocks) (parameterize ([basic-blocks blocks] [fname name] )
                                          (let ([cfg (build_cfg blocks)])
                                            ;; (printf "~a CFG: ~a~n" name cfg)
                                            ;; (print-graph cfg)
@@ -770,13 +773,17 @@
       (for*/list ([v lafter] [d (set->list Wset)] #:unless (equal? d v))
         `(,v ,d))))
   (match instr
-    [(Instr 'movq (list (app get-val s) (app get-val d))) (for/list ([v lafter] #:unless ((or/c s d) v))
-                                `(,v ,d))]
-    [(Instr 'movzbq (list (app get-val s) (app get-val d))) (for/list ([v lafter] #:unless ((or/c s d) v))
-                                `(,v ,d))]
-    [_ (let ([Wset (uncover_write instr)])
-         (for*/list ([v lafter] [d (set->list Wset)] #:unless (equal? d v))
-           `(,v ,d)))]))
+    [(Instr 'movq (list (app get-val s) (app get-val d))) (for/list ([v lafter] #:unless (and #t ((or/c s d) v)))
+                                                            `(,v ,d))]
+    [(Instr 'movzbq (list (app get-val s) (app get-val d))) (for/list ([v lafter] #:unless (and #t ((or/c s d) v)))
+                                                              `(,v ,d))]
+    [(Callq 'collect 2) (append (get_norm) (for*/list ([v lafter] [d (set->list callee-save)]
+                                                                  #:when (and (Var? v) (is-vector ltypes (Var-name v))))
+                                             `(,v ,d)))]
+    [(IndirectCallq _ _) (append (get_norm) (for*/list ([v lafter] [d (set->list callee-save)]
+                                                                   #:when (and (Var? v) (is-vector ltypes (Var-name v))))
+                                              `(,v ,d)))]
+    [_ (get_norm)]))
 
 (define (loc-hack code)
   (for/list ([v (set->list (foldr (lambda (ins varset)
@@ -848,7 +855,7 @@
     [(Instr 'set (cons cc args)) (Instr 'set (cons cc (assign-homes-aexps args locs)))]
     [(Instr op es) (Instr op (assign-homes-aexps es locs))]
     [(IndirectCallq target arity) (IndirectCallq (assign-home-atm target locs) arity)]
-    [(TailJmp target arity) (IndirectCallq (assign-home-atm target locs) arity)]
+    [(TailJmp target arity) (TailJmp (assign-home-atm target locs) arity)]
     [_ e]))
 
 (define (assign-homes-block block locs)
@@ -920,6 +927,9 @@
 (define (patch-instr e)
   (match e
     [(Instr 'movq (list v v)) '()]
+    [(Instr 'leaq (list e1 (Deref r1 o1))) (list
+                                            (Instr 'leaq (list e1 (Reg 'rax)))
+                                            (Instr 'movq (list (Reg 'rax) (Deref r1 o1))))]
     [(Instr 'cmpq (list e1 (Imm e2)))
      (list (Instr 'movq (list (Imm e2) (Reg 'rax)))
            (Instr 'cmpq (list e1 (Reg 'rax))))]
@@ -938,20 +948,27 @@
                                               (list (Instr 'movq (list (Imm n1) (Reg 'rax))) (Instr op (list (Reg 'rax) (Deref r1 o1))))]
     [(Instr op (list (Deref r1 o1) (Imm n1))) #:when (> (abs n1) 2147483647)
                                               (list (Instr 'movq (list (Imm n1) (Reg 'rax))) (Instr op (list (Deref r1 o1) (Reg 'rax))))]
+    [(TailJmp target arity) (gen-tail-conc #t) (list
+                                                (Instr 'movq (list target (Reg 'rax)))
+                                                (Jmp (symbol-append (fname) '_tailconclusion)))]
     [_ (list e)]))
 
 (define (patch-block block)
   (match block
     [(Block info es) (Block info (append-map patch-instr es))]))
+
+(define (patch-def d)
+  (match d
+    [(Def name param rty info blocks) (parameterize ([fname name] [gen-tail-conc #f])
+                                        (let ([newblocks (for/list ([block blocks]) (cons (car block) (patch-block (cdr block))))])
+                                          (Def name param rty (dict-set info 'gen-tail-conc (gen-tail-conc)) newblocks))
+                                        )]))
 ;; patch-instructions : x86var -> x86int
 (define (patch-instructions p)
   (match p
-    [(X86Program info body)
-     (X86Program info
-                 (for/list ([block body])
-                   (cons (car block) (patch-block (cdr block)))))]))
+    [(X86ProgramDefs info def*) (X86ProgramDefs info (for/list ([def def*]) (patch-def def)))]))
 
-(define (generate-prelude info)
+(define (generate-prelude name info)
   (let* ([S (dict-ref info 'stack-space)]
          [used-callee (dict-ref info 'used-callee)]
          [C (identity (length used-callee))]
@@ -962,15 +979,18 @@
              ,(Instr 'movq (list (Reg 'rsp) (Reg 'rbp)))
              ,@(if (not (eq? fsize 0)) (list (Instr 'subq (list (Imm fsize) (Reg 'rsp)))) '())
              ,@(map (lambda (v) (Instr 'pushq (list (Reg v)))) used-callee)
-             ,(Instr 'movq (list (Imm (rootstack-size)) (Reg 'rdi)))
-             ,(Instr 'movq (list (Imm (heap-size)) (Reg 'rsi)))
-             ,(Callq 'initialize 2)
-             ,(Instr 'movq (list (Global 'rootstack_begin) (Reg 'r15)))
+             ,@(if (eq? name 'main)
+                   `(
+                    ,(Instr 'movq (list (Imm (rootstack-size)) (Reg 'rdi)))
+                    ,(Instr 'movq (list (Imm (heap-size)) (Reg 'rsi)))
+                    ,(Callq 'initialize 2)
+                    ,(Instr 'movq (list (Global 'rootstack_begin) (Reg 'r15))))
+                   '())
              ,(Instr 'movq (list (Imm 0) (Deref 'r15 0)))
              ,(Instr 'addq (list (Imm rsize) (Reg 'r15)))
-             ,(Jmp 'start)))))
+             ,(Jmp (symbol-append name '_start))))))
 
-(define (generate-conclusion info)
+(define (generate-conclusion info is-tail)
   (let* ([S (dict-ref info 'stack-space)]
          [used-callee (dict-ref info 'used-callee)]
          [C (identity (length used-callee))]
@@ -981,14 +1001,22 @@
              ,(Instr 'subq (list (Imm rsize) (Reg 'r15)))
              ,@(if (not (eq? fsize 0)) (list (Instr 'addq (list (Imm fsize) (Reg 'rsp)))) '())
              ,(Instr 'popq (list (Reg 'rbp)))
-             ,(Retq)))))
+             ,(if is-tail
+                  (IndirectJmp (Reg 'rax))
+                  (Retq))))))
 ;; prelude-and-conclusion : x86int -> x86int
+
+(define (prelude-and-conclusion-def d)
+  (match d
+    [(Def name param rty info blocks) (append `((,name . ,(generate-prelude name info)) (,(symbol-append name '_conclusion) . ,(generate-conclusion info #f)))
+                                              (if (dict-ref info 'gen-tail-conc #f)
+                                                  `((,(symbol-append name '_tailconclusion) . ,(generate-conclusion info #t)))
+                                                  '())
+                                              blocks)]))
+
 (define (prelude-and-conclusion p)
   (match p
-    [(X86Program info body)
-     (X86Program
-      info
-      (dict-set* body 'main (generate-prelude info) 'conclusion (generate-conclusion info)))]))
+    [(X86ProgramDefs info def*) (X86Program info (append-map prelude-and-conclusion-def def*))]))
 
 
 (define (get-color-nonvec satset)
@@ -1111,6 +1139,6 @@
     ("reg-color" ,reg-color ,interp-pseudo-x86-3)
     ("assign homes" ,assign-homes ,interp-x86-3)
     ("patch instructions" ,patch-instructions ,interp-x86-3)
-    ("patch instructions 2" ,patch-instructions ,interp-x86-3)
-    ;; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-2)
+    ;; ("patch instructions 2" ,patch-instructions ,interp-x86-3)
+    ("prelude-and-conclusion" ,prelude-and-conclusion ,#f)
     ))
