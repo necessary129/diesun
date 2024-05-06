@@ -22,8 +22,17 @@
           #:prop strict-child-order? #t]
  [VariableReference Expression (name)
                     #:prop reference-info (read)]
- ;; [SetBangRet Expression (name Expression)
- ;;             #:prop reference-info (write)]
+ [SetBang Expression (name Expression)
+          #:prop reference-info (write #:unifies Expression)
+          ;; #:prop choice-weight 100
+          ]
+ [Begin Expression ([es : Expression * = 2] [body : Expression])
+        #:prop strict-child-order? #t
+        ;; #:prop choice-weight 100
+        ]
+ [WhileLoop Expression ([cnd : Expression] [body : Expression])
+            ;; #:prop choice-weight 55
+            ]
  [LiteralInt Expression ([v = (random-bits 40)])]
  [Addition Expression ([es : Expression * = 2])
            ;; #:prop choice-weight 25
@@ -32,6 +41,7 @@
               ;; #:prop choice-weight 25
               ]
  [PrimRead Expression ()]
+ [VoidExpression Expression ()]
  [LiteralBool Expression ([v = (random-bool)])]
  [Comparison Expression () #:prop may-be-generated #f]
  [EqComparison Comparison ([l : Expression] [r : Expression])]
@@ -48,6 +58,7 @@
 
 (define int (base-type 'int))
 (define bool (base-type 'bool))
+(define voidt (base-type 'void ))
 
 (add-property
  arith
@@ -56,11 +67,12 @@
  [LetStar [(fresh-type-variable)
            (λ (n t) (hash 'definitions (λ (cn) (fresh-type-variable))
                           'sideEs (λ (cn) (fresh-type-variable))
-                          'Expression t))]]
+                          'Expression t
+                          'WhileLoop voidt))]]
  [LiteralInt [int (λ (n t) (hash))]]
  [PrimRead [int (λ (n t) (hash))]]
  [VariableReference [(fresh-type-variable) (λ (n t) (hash))]]
- ;; [SetBangRet [(fresh-type-variable) (λ (n t) (hash 'Expression t))]]
+ [SetBang [voidt (λ (n t) (hash 'Expression (fresh-type-variable)))]]
  [Addition [int (λ (n t) (hash 'es t))]]
  [EqComparison [bool (lambda (n t)
                        (define arg-type (fresh-type-variable))
@@ -86,15 +98,19 @@
                      'r bool))]]
  [OpNot [bool (lambda (n t)
                 (hash 'e bool))]]
+ [VoidExpression [voidt (lambda (n t) (hash))]]
  [IfStmt [(fresh-type-variable) (lambda (n t)
                                   (hash 'cond bool
                                         'then t
                                         'else t))]]
  [LiteralBool [bool (lambda (n t) (hash))]]
 
- [Program [int (lambda (n t) (hash 'LetStar int))]]
+ [Program [int (lambda (n t) (hash 'LetStar t))]]
 
- [Subtraction [int (λ (n t) (hash 'es t))]])
+ [Subtraction [int (λ (n t) (hash 'es t))]]
+ [WhileLoop [voidt (lambda (n t) (hash 'cnd bool 'body (lambda (cn) (fresh-type-variable))))]]
+ [Begin [(fresh-type-variable) (lambda (n t) (hash 'es (lambda (cn) voidt) 'body t))]]
+ )
 
 (add-property
  arith
@@ -123,10 +139,13 @@
                                (ast-children (ast-child 'definitions n))))]
  [LiteralInt (λ (n) (ast-child 'v n))]
  [VariableReference (λ (n) (string->symbol (ast-child 'name n)))]
- ;; [SetBangRet (λ (n) `(begin (set! ,(string->symbol (ast-child 'name n))
- ;;                                  ,($xsmith_render-node
- ;;                                    (ast-child 'Expression n)))
- ;;                            ,(string->symbol (ast-child 'name n))))]
+ [SetBang (λ (n) `(set! ,(string->symbol (ast-child 'name n))
+                        ,($xsmith_render-node
+                          (ast-child 'Expression n))))]
+ [WhileLoop (lambda (n) `(while ,($xsmith_render-node (ast-child 'cnd n))
+                                ,($xsmith_render-node (ast-child 'body n))))]
+ [Begin (lambda (n) `(begin ,@(map (lambda (x) ($xsmith_render-node x)) (ast-children (ast-child 'es n)))
+                       ,($xsmith_render-node (ast-child 'body n))))]
  [Addition (λ (n) `(+ ,@(map (λ (c) ($xsmith_render-node c))
                              (ast-children (ast-child 'es n)))))]
  [Subtraction (λ (n) `(- ,@(map (λ (c) ($xsmith_render-node c))
@@ -143,6 +162,7 @@
                                  ,($xsmith_render-node (ast-child 'r n))))]
  [GtComparison (lambda (n) `(> ,($xsmith_render-node (ast-child 'l n))
                                ,($xsmith_render-node (ast-child 'r n))))]
+  [VoidExpression (lambda (n) '(void))]
  [OpAnd (lambda (n) `(and ,($xsmith_render-node (ast-child 'l n))
                           ,($xsmith_render-node (ast-child 'r n))))]
  [OpOr (lambda (n) `(or ,($xsmith_render-node (ast-child 'l n))
@@ -158,7 +178,9 @@
 (define-xsmith-interface-functions
   [arith]
   #:program-node Program
-  #:type-thunks (list (λ () int) (lambda () bool))
+  #:type-thunks (list (λ () int)
+                      (lambda () bool)
+                      (lambda () voidt))
   #:comment-wrap (λ (lines)
                    (string-join
                     (map (λ (x) (format ";; ~a" x)) lines)

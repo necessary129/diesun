@@ -4,13 +4,17 @@
 (require "utilities.rkt")
 (require "interp-Lvar.rkt")
 (require "interp-Cvar.rkt")
-(require "interp-Lif.rkt")
+(require "interp-Lfun.rkt")
+(require "interp-Cfun.rkt")
+(require "type-check-Lfun.rkt")
+(require "interp-Lwhile.rkt")
+(require "type-check-Lwhile.rkt")
 (require "type-check-Lif.rkt")
 (require "interp.rkt")
 (require "compiler.rkt")
 
 (debug-level 1)
-(AST-output-syntax 'concrete-syntax)
+;; (AST-output-syntax 'concrete-syntax)
 
 ;; all the files in the tests/ directory with extension ".rkt".
 (define all-tests
@@ -28,8 +32,8 @@
         all-tests)))
 
 ;; The following tests the intermediate-language outputs of the passes.
-(interp-tests "cond" type-check-Lif compiler-passes interp-Lif "cond_test" (tests-for "cond"))
+;; (interp-tests "functions" type-check-Lfun compiler-passes interp-Lfun "functions_test" (tests-for "functions"))
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.
-(compiler-tests "cond" type-check-Lif compiler-passes "cond_test" (tests-for "cond"))
+(compiler-tests "functions" type-check-Lfun compiler-passes "functions_test" (tests-for "functions"))
